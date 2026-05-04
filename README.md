@@ -57,15 +57,26 @@ Sample data includes policies (`PA-200001-01`, `HO-200002-01`, `CP-200004-01`), 
 
 ## Connect to Claude
 
-### Claude Code
+### Claude.ai (Web Chat) — recommended for most users
 
-```bash
-claude mcp add --transport sse gwmcp https://your-deployment.up.railway.app/sse
-```
+This requires the server to be deployed remotely (e.g. Railway) so Claude.ai can reach it.
 
-### Claude Desktop
+1. Go to **claude.ai → Settings → Integrations**
+2. Click **Add Integration**
+3. Enter the server URL:
+   ```
+   https://your-deployment.up.railway.app/sse
+   ```
+4. Click **Save**
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+The integration will appear in your Claude.ai chat. Enable it per-conversation using the tools icon in the chat bar, then ask things like:
+- *"Search for all inForce personal auto policies"*
+- *"Find accounts with last name Smith"*
+- *"Show me all renewal jobs for policy PA-200001-01"*
+
+### Claude Desktop (Mac/Windows app)
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
@@ -77,10 +88,13 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Then ask Claude things like:
-- *"Search for all inForce personal auto policies"*
-- *"Find accounts with last name Smith"*
-- *"Show me all pending renewal jobs for policy PA-200001-01"*
+Restart Claude Desktop after saving.
+
+### Claude Code (CLI)
+
+```bash
+claude mcp add --transport sse gwmcp https://your-deployment.up.railway.app/sse
+```
 
 ## Deploy to Railway
 
