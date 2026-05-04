@@ -61,6 +61,8 @@ Sample data includes policies (`PA-200001-01`, `HO-200002-01`, `CP-200004-01`), 
 
 This requires the server to be deployed remotely (e.g. Railway) so Claude.ai can reach it.
 
+> **Mobile:** The Claude iOS/Android app does not support MCP yet. On mobile, open **claude.ai in your browser** (Safari/Chrome) instead of the app.
+
 1. Go to **claude.ai → Settings → Integrations**
 2. Click **Add Integration**
 3. Enter the server URL:
