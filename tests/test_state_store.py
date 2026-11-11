@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from client import EverywireError
-from state_store import PersistentMockClient, UpstashStore
+from state_store import STATE_KEY, PersistentMockClient, UpstashStore
 
 
 class FakeUpstash:
@@ -106,3 +106,66 @@ def test_create_account_persists():
                                   "12 Oak St", "Springfield", "IL", "62704"))
     found = run(make(fake).search("/accounts", {"lastName": "Lopez"}))["data"]
     assert [a["attributes"]["accountNumber"] for a in found] == ["ACC-10006"]
+
+
+class CountingLookup:
+    """Fails the test if called while a store load/apply/save cycle is in progress."""
+
+    def __init__(self, client_ref):
+        self.client_ref = client_ref
+        self.calls = 0
+
+    async def __call__(self, address):
+        assert not self.client_ref["in_run"], "lookup ran inside _run"
+        self.calls += 1
+        return {"input": address,
+                "geocode": {"status": "ok", "source": "US Census Geocoder", "matchedAddress": "M",
+                            "state": "TX", "county": "Travis County", "lat": 30.0, "lon": -97.0},
+                "flood": {"status": "ok", "source": "FEMA National Flood Hazard Layer", "zone": "AE",
+                          "subtype": None}}
+
+
+def make_with_lookup(fake):
+    ref = {"in_run": False}
+    lookup = CountingLookup(ref)
+    store = UpstashStore("https://fake.upstash.io", "tok", transport=httpx.MockTransport(fake.handler))
+    client = PersistentMockClient(store, property_lookup=lookup)
+    inner = client._run
+
+    async def tracked(*a, **kw):
+        ref["in_run"] = True
+        try:
+            return await inner(*a, **kw)
+        finally:
+            ref["in_run"] = False
+    client._run = tracked
+    return client, lookup
+
+
+def test_persistent_lookup_runs_outside_run():
+    from datetime import date, timedelta
+    fake = FakeUpstash()
+    client, lookup = make_with_lookup(fake)
+    eff = (date.today() + timedelta(days=10)).isoformat()
+    num = run(client.start_submission("ACC-10001", "HomeOwners", eff))["policyNumber"]
+
+    def concurrent_bump(f):  # the first save loses a race and must retry
+        f.data[f"{STATE_KEY}:rev"] = str(int(f.data.get(f"{STATE_KEY}:rev", 0)) + 1)
+    fake.before_eval = concurrent_bump
+    v = run(client.set_home_details(num, "1 Main St, Austin, TX 78701", 1998, "frame", 2000))
+    assert lookup.calls == 1
+    assert v["draft"]["home"]["lookup"]["flood"]["zone"] == "AE"
+    q = run(client.quote_policy_change(num))
+    assert lookup.calls == 1 and len(q["draft"]["quote"]["factors"]) == 7
+
+
+def test_home_state_round_trips():
+    from datetime import date, timedelta
+    fake = FakeUpstash()
+    client, _ = make_with_lookup(fake)
+    eff = (date.today() + timedelta(days=10)).isoformat()
+    num = run(client.start_submission("ACC-10001", "HomeOwners", eff))["policyNumber"]
+    run(client.set_home_details(num, "1 Main St, Austin, TX 78701", 1998))
+    fresh, _ = make_with_lookup(fake)
+    v = run(fresh.get_policy_view(num))
+    assert v["draft"]["home"]["yearBuilt"] == 1998 and v["draft"]["kind"] == "submission"

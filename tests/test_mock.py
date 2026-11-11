@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import pytest
 
 from client import EverywireError
-from mock import MockEverywireClient, _one_year_after
+from mock import MockEverywireClient, _one_year_after, home_factors
 from views import policy_view_text
 
 
@@ -340,3 +340,190 @@ def test_old_state_drafts_get_kind(gw):
     restored = MockEverywireClient.from_state(state)
     assert run(restored.get_policy_view("PA-200001-01"))["draft"]["kind"] == "change"
     assert run(restored.start_submission("ACC-10001", "PersonalAuto", days(1)))["policyNumber"] == "PA-200007-01"
+
+
+# ------------------------------------------------------- home details / rating
+
+ADDR = "12 Oak St, Springfield, IL 62704"
+
+
+def lookup_result(address=ADDR, geocode="ok", state="IL", flood="ok", zone="X"):
+    ok = geocode == "ok"
+    return {
+        "input": address,
+        "geocode": {"status": geocode, "source": "US Census Geocoder",
+                    "matchedAddress": "12 OAK ST, SPRINGFIELD, IL, 62704" if ok else None,
+                    "state": state if ok else None, "county": "Sangamon County" if ok else None,
+                    "lat": 39.78 if ok else None, "lon": -89.65 if ok else None},
+        "flood": {"status": flood if ok else "skipped", "source": "FEMA National Flood Hazard Layer",
+                  "zone": zone if ok and flood == "ok" else None, "subtype": None},
+    }
+
+
+class FakeLookup:
+    def __init__(self, *results):
+        self.results = list(results)
+        self.calls: list[str] = []
+
+    async def __call__(self, address):
+        self.calls.append(address)
+        r = self.results.pop(0) if len(self.results) > 1 else (self.results[0] if self.results else lookup_result())
+        return {**r, "input": address}
+
+
+@pytest.fixture
+def fake():
+    return FakeLookup(lookup_result())
+
+
+@pytest.fixture
+def hgw(fake):
+    return MockEverywireClient(property_lookup=fake)
+
+
+def ho_submission(client, eff=10):
+    return run(client.start_submission("ACC-10001", "HomeOwners", days(eff)))["policyNumber"]
+
+
+def full_details(client, num):
+    return run(client.set_home_details(num, ADDR, 1998, "masonry", 2100, 2019, 2))
+
+
+def test_home_factors_table():
+    home = {"address": ADDR, "yearBuilt": 1998, "constructionType": "masonry", "squareFeet": 2100,
+            "roofYear": 2019, "stories": 2, "lookup": lookup_result(state="FL", zone="AE")}
+    factors = home_factors(home, date(2026, 12, 1))
+    assert [f["name"] for f in factors] == ["Home age", "Construction", "Size", "Roof age", "Stories",
+                                            "Flood zone", "State"]
+    assert [f["multiplier"] for f in factors] == [1.12, 0.92, 1.025, 0.95, 1.03, 1.35, 1.45]
+
+
+@pytest.mark.parametrize("zone, mult", [("VE", 1.60), ("A", 1.35), ("AE", 1.35), ("X", 1.0), ("D", 1.0)])
+def test_flood_zone_multipliers(zone, mult):
+    home = {"address": ADDR, "lookup": lookup_result(zone=zone)}
+    assert next(f for f in home_factors(home, date(2026, 12, 1)) if f["name"] == "Flood zone")["multiplier"] == mult
+
+
+def test_homeowners_submission_quote(hgw):
+    num = ho_submission(hgw)
+    full_details(hgw, num)
+    q = run(hgw.quote_policy_change(num))["draft"]["quote"]
+    assert q["annualPremium"] == round(1450 * 1.12 * 0.92 * 1.025 * 0.95 * 1.03 * 1.0 * 1.0, 2)
+    assert q["changeInCost"] == q["annualPremium"]
+    assert len(q["factors"]) == 7
+    text = policy_view_text(run(hgw.get_policy_view(num)))
+    assert "Construction: masonry ×0.92" in text
+    assert "12 OAK ST, SPRINGFIELD, IL, 62704" in text and "FEMA National Flood Hazard Layer" in text
+
+
+def test_homeowners_submission_requires_details(hgw):
+    num = ho_submission(hgw)
+    with pytest.raises(EverywireError, match="address"):
+        run(hgw.quote_policy_change(num))
+    run(hgw.set_home_details(num, ADDR))
+    with pytest.raises(EverywireError) as e:
+        run(hgw.quote_policy_change(num))
+    for field in ("year built", "construction type", "square footage"):
+        assert field in str(e.value)
+
+
+def test_lookup_runs_once_then_only_on_address_change(hgw, fake):
+    num = ho_submission(hgw)
+    run(hgw.set_home_details(num, ADDR))
+    run(hgw.set_home_details(num, None, 1998))
+    run(hgw.set_home_details(num, ADDR, None, "frame"))  # same address: no new lookup
+    assert fake.calls == [ADDR]
+    run(hgw.set_home_details(num, "14 Oak St, Springfield, IL 62704"))
+    assert fake.calls == [ADDR, "14 Oak St, Springfield, IL 62704"]
+
+
+def test_failed_lookup_retried_on_next_call_and_quote():
+    fake = FakeLookup(lookup_result(geocode="failed"), lookup_result(geocode="failed"), lookup_result())
+    gw = MockEverywireClient(property_lookup=fake)
+    num = ho_submission(gw)
+    run(gw.set_home_details(num, ADDR))
+    run(gw.set_home_details(num, None, 1998, "frame", 1800))  # retries (still failing)
+    assert len(fake.calls) == 2
+    v = run(gw.quote_policy_change(num))  # retries again, succeeds
+    assert len(fake.calls) == 3
+    assert v["draft"]["home"]["lookup"]["geocode"]["status"] == "ok"
+    run(gw.quote_policy_change(num))
+    assert len(fake.calls) == 3
+
+
+def test_no_match_not_retried_and_prices_neutral():
+    fake = FakeLookup(lookup_result(geocode="no_match"))
+    gw = MockEverywireClient(property_lookup=fake)
+    num = ho_submission(gw)
+    run(gw.set_home_details(num, ADDR, 1998, "masonry", 2100))
+    v = run(gw.quote_policy_change(num))
+    assert len(fake.calls) == 1
+    factors = {f["name"]: f for f in v["draft"]["quote"]["factors"]}
+    assert factors["Flood zone"]["multiplier"] == 1.0 and factors["State"]["multiplier"] == 1.0
+    assert "address not verified" in policy_view_text(v)
+
+
+def test_failed_lookup_still_quotes(hgw):
+    gw = MockEverywireClient(property_lookup=FakeLookup(lookup_result(geocode="failed")))
+    num = ho_submission(gw)
+    run(gw.set_home_details(num, ADDR, 1998, "masonry", 2100))
+    v = run(gw.quote_policy_change(num))
+    factors = {f["name"]: f for f in v["draft"]["quote"]["factors"]}
+    assert factors["State"]["detail"] == "unavailable" and v["draft"]["quote"]["annualPremium"] > 0
+
+
+@pytest.mark.parametrize("given", ["Masonry Veneer", "masonry-veneer", " MASONRY_VENEER "])
+def test_construction_type_normalized(hgw, given):
+    num = ho_submission(hgw)
+    v = run(hgw.set_home_details(num, ADDR, None, given))
+    assert v["draft"]["home"]["constructionType"] == "masonry_veneer"
+
+
+def test_construction_type_unknown(hgw):
+    num = ho_submission(hgw)
+    with pytest.raises(EverywireError, match="frame, masonry_veneer, masonry, superior"):
+        run(hgw.set_home_details(num, ADDR, None, "straw"))
+
+
+@pytest.mark.parametrize("args, match", [
+    ((ADDR, 1700), "year built"),
+    ((ADDR, None, None, 50), "square footage"),
+    ((ADDR, 1998, None, None, 1990), "roof"),
+    ((ADDR, None, None, None, None, 9), "stories"),
+    ((None, 1998), "address"),
+    ((ADDR, "old"), "year built"),
+])
+def test_home_details_validation(hgw, args, match):
+    num = ho_submission(hgw)
+    with pytest.raises(EverywireError, match=match):
+        run(hgw.set_home_details(num, *args))
+
+
+def test_home_details_rejected_on_auto(hgw):
+    num = run(hgw.start_submission("ACC-10001", "PersonalAuto", days(10)))["policyNumber"]
+    with pytest.raises(EverywireError, match="not a Homeowners policy"):
+        run(hgw.set_home_details(num, ADDR))
+
+
+def test_bound_home_carries_into_policy_change(hgw):
+    num = ho_submission(hgw, eff=0)
+    full_details(hgw, num)
+    run(hgw.quote_policy_change(num))
+    bound = run(hgw.bind_policy_change(num))
+    assert bound["home"]["yearBuilt"] == 1998 and bound["status"] == "inForce"
+    v = run(hgw.start_policy_change(num, days(5)))
+    assert v["draft"]["home"] == bound["home"]
+    run(hgw.set_home_details(num, None, None, None, None, 2000))  # roof age >20: factor 0.95 → 1.20
+    q = run(hgw.quote_policy_change(num))["draft"]["quote"]
+    assert q["changeInCost"] != 0 and len(q["factors"]) == 7
+
+
+def test_seed_homeowners_unchanged(hgw, fake):
+    before = run(hgw.get_policy_view("HO-200002-01"))
+    assert before["premium"] == 1450.0 and before["home"] is None
+    run(hgw.start_policy_change("HO-200002-01", "2026-12-01"))
+    run(hgw.update_coverage("HO-200002-01", "HOWaterBackup", "$10,000"))
+    q = run(hgw.quote_policy_change("HO-200002-01"))["draft"]["quote"]
+    assert q["factors"] == [] and q["annualPremium"] == 1525.0
+    assert 0 < q["changeInCost"] < 75
+    assert fake.calls == []

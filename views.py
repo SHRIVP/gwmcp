@@ -65,6 +65,7 @@ def build_policy_view(policy: dict, draft: dict | None, jobs: list[dict]) -> dic
         "premium": policy["premium"],
         "vehicles": policy.get("vehicles", []),
         "drivers": policy.get("drivers", []),
+        "home": policy.get("home"),
         "coverages": policy.get("coverages", []),
         "canEdit": policy["status"] in EDITABLE_STATUSES,
         "version": policy.get("version", 0),
@@ -80,6 +81,7 @@ def build_policy_view(policy: dict, draft: dict | None, jobs: list[dict]) -> dic
             "description": draft.get("description") or "",
             "vehicles": _diff_by_id(view["vehicles"], draft["vehicles"]),
             "drivers": _diff_by_id(view["drivers"], draft.get("drivers", [])),
+            "home": draft.get("home"),
             "coverages": _diff_coverages(view["coverages"], draft["coverages"]),
             "quote": draft.get("quote"),
         }
@@ -101,6 +103,34 @@ def _driver_label(d: dict) -> str:
     return f"{d['firstName']} {d['lastName']} (born {d['dateOfBirth']}{lic}) [id {d['id']}]"
 
 
+def _home_lines(home: dict) -> list[str]:
+    lookup = home.get("lookup") or {}
+    geo, flood = lookup.get("geocode") or {}, lookup.get("flood") or {}
+    lines = ["Home:"]
+    if geo.get("status") == "ok":
+        lines.append(f"  • Address: {home['address']} (matched: {geo['matchedAddress']}, "
+                     f"{geo.get('county') or 'county unknown'}, {geo.get('state')}; source {geo['source']})")
+    elif geo.get("status") == "no_match":
+        lines.append(f"  • Address: {home['address']} (address not verified: no match in {geo['source']})")
+    else:
+        lines.append(f"  • Address: {home['address']} (address check unavailable)")
+    if flood.get("status") == "ok":
+        lines.append(f"  • Flood zone: {flood['zone']} (source {flood['source']})")
+    elif flood.get("status") == "not_mapped":
+        lines.append(f"  • Flood zone: outside mapped flood areas (source {flood['source']})")
+    elif flood.get("status") == "failed":
+        lines.append("  • Flood zone: unavailable (FEMA lookup failed; it will be retried)")
+    details = [
+        f"built {home['yearBuilt']}" if home.get("yearBuilt") else "year built not given",
+        (home.get("constructionType") or "construction not given").replace("_", " "),
+        f"{home['squareFeet']:,} sq ft" if home.get("squareFeet") else "square footage not given",
+        f"roof {home['roofYear']}" if home.get("roofYear") else "roof year not given",
+        f"{home['stories']} stories" if home.get("stories") else "stories not given",
+    ]
+    lines.append("  • " + " · ".join(details))
+    return lines
+
+
 def policy_view_text(view: dict, headline: str | None = None) -> str:
     lines = []
     if headline:
@@ -118,6 +148,11 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
     if view["drivers"]:
         lines.append("Drivers:")
         lines += [f"  • {_driver_label(d)}" for d in view["drivers"]]
+    home = (view.get("draft") or {}).get("home") or view.get("home")
+    if home:
+        lines += _home_lines(home)
+    elif view["product"]["code"] == "HomeOwners" and view.get("draft", {}) and view["draft"]["kind"] == "submission":
+        lines.append("Home: no details yet — call set_home_details with the property address.")
     lines.append("Coverages (code: value — allowed values):")
     lines += [f"  • {c['code']}: {c['value']} — {', '.join(c['options'])}" for c in view["coverages"]]
 
@@ -138,6 +173,8 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
         lines += changes or ["  (no changes yet)"]
         if d["quote"]:
             q = d["quote"]
+            for f in q.get("factors") or []:
+                lines.append(f"  {f['name']}: {f['detail']} ×{f['multiplier']}")
             if d["kind"] == "submission":
                 lines.append(f"  Quoted: annual premium {_money(q['annualPremium'])}")
                 lines.append("  The user binds the new policy with the Bind button in the Policy System view.")

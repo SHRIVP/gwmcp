@@ -21,6 +21,7 @@ import httpx
 
 from client import EverywireError
 from mock import MockEverywireClient
+from property_data import lookup_property
 
 STATE_KEY = os.environ.get("GW_STATE_KEY", "gwmcp:mock:state")
 
@@ -76,14 +77,16 @@ class PersistentMockClient:
     supports_editing = True
     MAX_ATTEMPTS = 5
 
-    def __init__(self, store):
+    def __init__(self, store, property_lookup=None):
         self.store = store
+        self.property_lookup = property_lookup or lookup_property
 
-    async def _run(self, method: str, *args, write: bool):
+    async def _run(self, method: str, *args, write: bool, **kwargs):
         for _ in range(self.MAX_ATTEMPTS):
             state, rev = await self.store.load()
-            mock = MockEverywireClient.from_state(state) if state else MockEverywireClient()
-            result = await getattr(mock, method)(*args)  # EverywireError propagates; nothing is saved
+            mock = (MockEverywireClient.from_state(state, self.property_lookup) if state
+                    else MockEverywireClient(self.property_lookup))
+            result = await getattr(mock, method)(*args, **kwargs)  # EverywireError propagates; nothing saved
             if not write or await self.store.save(mock.to_state(), rev):
                 return result
         raise EverywireError(409, "Policy System is busy with another change to this data. Try again.")
@@ -117,8 +120,18 @@ class PersistentMockClient:
     async def update_coverage(self, *a):
         return await self._run("update_coverage", *a, write=True)
 
+    async def _prefetch_lookup(self, policy_number, address) -> dict | None:
+        """Run the slow public lookups before the load/apply/save cycle, so retries don't repeat them."""
+        target = await self._run("home_lookup_needed", policy_number, address, write=False)
+        return await self.property_lookup(target) if target else None
+
+    async def set_home_details(self, *a):
+        lookup = await self._prefetch_lookup(a[0], a[1] if len(a) > 1 else None)
+        return await self._run("set_home_details", *a, write=True, lookup=lookup)
+
     async def quote_policy_change(self, *a):
-        return await self._run("quote_policy_change", *a, write=True)
+        lookup = await self._prefetch_lookup(a[0], None)
+        return await self._run("quote_policy_change", *a, write=True, lookup=lookup)
 
     async def bind_policy_change(self, *a):
         return await self._run("bind_policy_change", *a, write=True)

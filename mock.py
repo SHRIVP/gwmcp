@@ -12,6 +12,7 @@ import copy
 from datetime import date, datetime, timezone
 
 from client import EverywireError
+from property_data import lookup_failed, lookup_property
 from views import EDITABLE_STATUSES, build_policy_view
 
 ACCOUNTS = [
@@ -283,9 +284,74 @@ def _vehicle_rate(v: dict) -> float:
     return 420.0 + max(0, int(v["year"]) - 2015) * 12.0
 
 
+# ------------------------------------------------------------ homeowners rating
+# Demo factors, not filed rates. Applied only to Homeowners records that have home details.
+
+CONSTRUCTION_TYPES = {"frame": 1.10, "masonry_veneer": 1.00, "masonry": 0.92, "superior": 0.85}
+STATE_FACTORS = {"FL": 1.45, "LA": 1.40, "TX": 1.30, "OK": 1.25, "CA": 1.15, "CO": 1.10,
+                 "NY": 1.05, "OH": 0.90, "ID": 0.85}
+REQUIRED_HOME_FIELDS = {"address": "address", "yearBuilt": "year built",
+                        "constructionType": "construction type", "squareFeet": "square footage"}
+
+
+def _factor(name: str, detail: str, multiplier: float) -> dict:
+    return {"name": name, "detail": detail, "multiplier": multiplier}
+
+
+def _flood_factor(lookup: dict | None) -> dict:
+    flood = (lookup or {}).get("flood") or {}
+    status, zone = flood.get("status"), flood.get("zone") or ""
+    if status == "ok":
+        mult = 1.60 if zone.startswith("V") else 1.35 if zone.startswith("A") else 1.0
+        return _factor("Flood zone", f"zone {zone}", mult)
+    detail = {"not_mapped": "outside mapped flood areas", "skipped": "address not verified"}.get(status, "unavailable")
+    if status == "skipped" and ((lookup or {}).get("geocode") or {}).get("status") == "failed":
+        detail = "unavailable"
+    return _factor("Flood zone", detail, 1.0)
+
+
+def _state_factor(lookup: dict | None) -> dict:
+    geo = (lookup or {}).get("geocode") or {}
+    if geo.get("status") == "ok" and geo.get("state"):
+        return _factor("State", geo["state"], STATE_FACTORS.get(geo["state"], 1.0))
+    return _factor("State", "address not verified" if geo.get("status") == "no_match" else "unavailable", 1.0)
+
+
+def home_factors(home: dict, as_of: date) -> list[dict]:
+    factors = []
+    built = home.get("yearBuilt")
+    if built is None:
+        factors.append(_factor("Home age", "not given", 1.0))
+    else:
+        age = as_of.year - built
+        factors.append(_factor("Home age", f"{age} years",
+                               0.90 if age <= 10 else 1.00 if age <= 25 else 1.12 if age <= 50 else 1.25))
+    ctype = home.get("constructionType")
+    factors.append(_factor("Construction", ctype.replace("_", " ") if ctype else "not given",
+                           CONSTRUCTION_TYPES.get(ctype, 1.0)))
+    sqft = home.get("squareFeet")
+    factors.append(_factor("Size", f"{sqft:,} sq ft" if sqft else "not given",
+                           round(min(1.6, max(0.75, 0.5 + 0.5 * sqft / 2000)), 3) if sqft else 1.0))
+    roof = home.get("roofYear")
+    if roof is None:
+        factors.append(_factor("Roof age", "not given", 1.0))
+    else:
+        r = as_of.year - roof
+        factors.append(_factor("Roof age", f"{r} years", 0.95 if r <= 10 else 1.05 if r <= 20 else 1.20))
+    stories = home.get("stories")
+    factors.append(_factor("Stories", str(stories) if stories else "not given",
+                           1.03 if stories == 2 else 1.08 if stories and stories >= 3 else 1.0))
+    factors.append(_flood_factor(home.get("lookup")))
+    factors.append(_state_factor(home.get("lookup")))
+    return factors
+
+
 def rate(product_code: str, vehicles: list[dict], coverages: list[dict],
-         drivers: list[dict] = (), as_of: date | None = None) -> float:
+         drivers: list[dict] = (), as_of: date | None = None, home: dict | None = None) -> float:
     total = BASE_PREMIUM.get(product_code, 1000.0)
+    if product_code == "HomeOwners" and home:
+        for f in home_factors(home, as_of or date.today()):
+            total *= f["multiplier"]
     total += sum(_vehicle_rate(v) for v in vehicles)
     total += sum(_driver_rate(d, as_of or date.today()) for d in drivers)
     for c in coverages:
@@ -331,7 +397,9 @@ class MockEverywireClient:
 
     supports_editing = True
 
-    def __init__(self) -> None:
+    def __init__(self, property_lookup=None) -> None:
+        # async (address) -> lookup result; not persisted. Tests pass a fake.
+        self.property_lookup = property_lookup or lookup_property
         self.accounts = copy.deepcopy(ACCOUNTS)
         self.policies = copy.deepcopy(POLICIES)
         self.jobs = copy.deepcopy(JOBS)
@@ -367,8 +435,8 @@ class MockEverywireClient:
         return {f: copy.deepcopy(getattr(self, f)) for f in self._STATE_FIELDS}
 
     @classmethod
-    def from_state(cls, state: dict) -> "MockEverywireClient":
-        client = cls()
+    def from_state(cls, state: dict, property_lookup=None) -> "MockEverywireClient":
+        client = cls(property_lookup)
         for f in cls._STATE_FIELDS:
             if f in state:
                 setattr(client, f, copy.deepcopy(state[f]))
@@ -696,6 +764,78 @@ class MockEverywireClient:
         self._next_driver += 1
         return self._edited(num, draft)
 
+    async def home_lookup_needed(self, policy_number: str, address: str | None) -> str | None:
+        """The address set_home_details / quote would look up now, or None. Read-only."""
+        num = self._policy(policy_number)["attributes"]["policyNumber"]
+        draft = self._drafts.get(num)
+        if not draft or self._record(self._policy(num))["product"]["code"] != "HomeOwners":
+            return None
+        home = draft.get("home") or {}
+        new = (address or "").strip()
+        if new and new != home.get("address"):
+            return new
+        if home.get("address") and lookup_failed(home.get("lookup")):
+            return home["address"]
+        return None
+
+    async def set_home_details(self, policy_number: str, address: str | None = None, year_built=None,
+                               construction_type: str | None = None, square_feet=None, roof_year=None,
+                               stories=None, lookup: dict | None = None) -> dict:
+        num, draft = self._draft(policy_number)
+        if self._record(self._policy(num))["product"]["code"] != "HomeOwners":
+            raise EverywireError(400, f"Policy {num} is not a Homeowners policy; it has no home details.")
+        home = copy.deepcopy(draft.get("home")) or {
+            "address": None, "yearBuilt": None, "constructionType": None, "squareFeet": None,
+            "roofYear": None, "stories": None, "lookup": None}
+        this_year = date.today().year
+
+        def as_int(value, label):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                raise EverywireError(400, f"{label} must be a whole number, got {value!r}")
+
+        address = (address or "").strip() or None
+        if not address and not home["address"]:
+            raise EverywireError(400, "Give the property address first (one line, e.g. "
+                                      "'12 Oak St, Springfield, IL 62704').")
+        if year_built is not None:
+            year_built = as_int(year_built, "year built")
+            if not 1800 <= year_built <= this_year:
+                raise EverywireError(400, f"year built must be between 1800 and {this_year}.")
+            home["yearBuilt"] = year_built
+        if construction_type is not None:
+            ctype = construction_type.strip().lower().replace(" ", "_").replace("-", "_")
+            if ctype not in CONSTRUCTION_TYPES:
+                raise EverywireError(400, f"{construction_type!r} isn't a construction type. "
+                                          f"Allowed: {', '.join(CONSTRUCTION_TYPES)}.")
+            home["constructionType"] = ctype
+        if square_feet is not None:
+            square_feet = as_int(square_feet, "square footage")
+            if not 300 <= square_feet <= 20000:
+                raise EverywireError(400, "square footage must be between 300 and 20,000.")
+            home["squareFeet"] = square_feet
+        if roof_year is not None:
+            roof_year = as_int(roof_year, "roof year")
+            if not (home["yearBuilt"] or 1800) <= roof_year <= this_year:
+                raise EverywireError(400, f"roof year must be between the year built and {this_year}.")
+            home["roofYear"] = roof_year
+        if stories is not None:
+            stories = as_int(stories, "stories")
+            if not 1 <= stories <= 4:
+                raise EverywireError(400, "stories must be between 1 and 4.")
+            home["stories"] = stories
+
+        target = await self.home_lookup_needed(num, address)
+        if address:
+            home["address"] = address
+        draft["home"] = home
+        if target:
+            if not lookup or lookup.get("input") != target:
+                lookup = await self.property_lookup(target)
+            home["lookup"] = lookup
+        return self._edited(num, draft)
+
     async def update_coverage(self, policy_number: str, coverage_code: str, value: str) -> dict:
         num, draft = self._draft(policy_number)
         cov = next((c for c in draft["coverages"] if c["code"].lower() == (coverage_code or "").lower()), None)
@@ -709,20 +849,32 @@ class MockEverywireClient:
         cov["value"] = match
         return self._edited(num, draft)
 
-    async def quote_policy_change(self, policy_number: str) -> dict:
+    async def quote_policy_change(self, policy_number: str, lookup: dict | None = None) -> dict:
         num, draft = self._draft(policy_number)
         rec = self._record(self._policy(num))
+        product = rec["product"]["code"]
         submission = draft["kind"] == "submission"
-        if submission and rec["product"]["code"] == "PersonalAuto" and not (draft["vehicles"] and draft["drivers"]):
+        if submission and product == "PersonalAuto" and not (draft["vehicles"] and draft["drivers"]):
             raise EverywireError(400, "Add at least one vehicle and one driver before quoting.")
+        home = draft.get("home")
+        if submission and product == "HomeOwners":
+            missing = [label for key, label in REQUIRED_HOME_FIELDS.items() if not (home or {}).get(key)]
+            if missing:
+                raise EverywireError(400, f"Missing home details: {', '.join(missing)}. "
+                                          "Add them with set_home_details before quoting.")
+        if home and lookup_failed(home.get("lookup")):
+            if not lookup or lookup.get("input") != home["address"]:
+                lookup = await self.property_lookup(home["address"])
+            home["lookup"] = lookup
         start = date.fromisoformat(draft["effectiveDate"])
-        new_annual = rate(rec["product"]["code"], draft["vehicles"], draft["coverages"], draft["drivers"], start)
+        new_annual = rate(product, draft["vehicles"], draft["coverages"], draft["drivers"], start, home)
         term_start = date.fromisoformat(rec["effectiveDate"])
         term_end = date.fromisoformat(rec["expirationDate"])
         fraction = (term_end - start).days / (term_end - term_start).days
         draft["quote"] = {
             "annualPremium": new_annual,
             "changeInCost": new_annual if submission else round((new_annual - rec["premium"]) * fraction, 2),
+            "factors": home_factors(home, start) if product == "HomeOwners" and home else [],
         }
         draft["status"] = "Quoted"
         self._set_job_status(draft["jobNumber"], "Quoted")

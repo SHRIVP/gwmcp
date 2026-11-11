@@ -224,6 +224,29 @@ EDIT_TOOLS = [
         ["policyNumber", "firstName", "lastName", "dateOfBirth"], ui=True,
     ),
     _tool(
+        "set_home_details", "Set home details",
+        "Set or update the home's details on the open submission or policy change of a Homeowners policy. "
+        "The first call needs the property address; the server then checks it with the US Census Geocoder "
+        "and looks up its FEMA flood zone. Later calls update only the fields given. A new submission needs "
+        "address, year built, construction type and square footage before it can be quoted. If you take any "
+        "value from a web search rather than from the user, say where it came from and ask the user to "
+        "confirm it before quoting.",
+        {
+            "policyNumber": POLICY_NUMBER,
+            "address": {"type": "string", "description": "Property address on one line, "
+                                                         "e.g. '12 Oak St, Springfield, IL 62704'"},
+            "yearBuilt": {"type": "integer", "description": "Year the home was built"},
+            "constructionType": {"type": "string", "enum": ["frame", "masonry_veneer", "masonry", "superior"],
+                                 "description": "Construction: frame (wood), masonry_veneer (brick/stone "
+                                                "veneer over frame), masonry (solid brick/block), superior "
+                                                "(fire-resistive)"},
+            "squareFeet": {"type": "integer", "description": "Living area in square feet"},
+            "roofYear": {"type": "integer", "description": "Year the roof was installed or last replaced"},
+            "stories": {"type": "integer", "description": "Number of stories (1-4)"},
+        },
+        ["policyNumber"], ui=True,
+    ),
+    _tool(
         "update_coverage", "Update coverage",
         "Change a coverage limit or deductible on the open policy change, using one of the allowed values "
         "listed by open_policy.",
@@ -268,6 +291,8 @@ EDIT_DISPATCH = {
     "remove_vehicle": ("remove_vehicle", ["policyNumber", "vehicleId"], "Removed the vehicle."),
     "add_driver": ("add_driver", ["policyNumber", "firstName", "lastName", "dateOfBirth", "licenseNumber"],
                    "Added the driver."),
+    "set_home_details": ("set_home_details", ["policyNumber", "address", "yearBuilt", "constructionType",
+                                              "squareFeet", "roofYear", "stories"], "Updated the home details."),
     "update_coverage": ("update_coverage", ["policyNumber", "coverageCode", "value"], "Updated the coverage."),
     "quote_policy_change": ("quote_policy_change", ["policyNumber"], "Quoted the policy change."),
     "withdraw_policy_change": ("withdraw_policy_change", ["policyNumber"], "Withdrew the policy change."),
