@@ -150,3 +150,53 @@ def test_old_state_without_drivers_loads(gw):
         d.pop("drivers")
     restored = MockEverywireClient.from_state(state)
     assert run(restored.get_policy_view("PA-200001-01"))["drivers"] == []
+
+
+# --------------------------------------------------------------- new business
+
+MARIA = dict(first_name="Maria", last_name="Lopez", company_name=None, email="maria@example.com",
+             address_line1="12 Oak St", city="Springfield", state="il", postal_code="62704")
+
+
+def test_create_person_account(gw):
+    acct = run(gw.create_account(**MARIA, phone="217-555-0100"))
+    a = acct["attributes"]
+    assert a["accountNumber"] == "ACC-10006"
+    assert a["primaryAddress"] == {"addressLine1": "12 Oak St", "city": "Springfield",
+                                   "state": "IL", "postalCode": "62704"}
+    assert a["phone"] == "217-555-0100" and a["emailAddress"] == "maria@example.com"
+    found = run(gw.search("/accounts", {"lastName": "Lopez"}))["data"]
+    assert [x["attributes"]["accountNumber"] for x in found] == ["ACC-10006"]
+
+
+def test_create_company_account(gw):
+    run(gw.create_account(**MARIA))
+    acct = run(gw.create_account(**{**MARIA, "first_name": None, "last_name": None,
+                                    "company_name": "Lopez Bakery LLC"}))
+    assert acct["attributes"]["accountNumber"] == "ACC-10007"
+    assert acct["attributes"]["companyName"] == "Lopez Bakery LLC"
+
+
+@pytest.mark.parametrize("override, match", [
+    ({"first_name": None, "last_name": None}, "name"),
+    ({"company_name": "Acme"}, "either"),
+    ({"email": "maria.example.com"}, "email"),
+    ({"state": "Illinois"}, "2-letter"),
+    ({"postal_code": "627"}, "ZIP"),
+    ({"city": " "}, "address"),
+])
+def test_create_account_validation(gw, override, match):
+    with pytest.raises(EverywireError, match=match):
+        run(gw.create_account(**{**MARIA, **override}))
+
+
+def test_create_account_accepts_zip_plus_four(gw):
+    acct = run(gw.create_account(**{**MARIA, "postal_code": "62704-1234"}))
+    assert acct["attributes"]["primaryAddress"]["postalCode"] == "62704-1234"
+
+
+def test_old_state_without_account_counter_loads(gw):
+    state = gw.to_state()
+    state.pop("_next_account", None)
+    restored = MockEverywireClient.from_state(state)
+    assert run(restored.create_account(**MARIA))["attributes"]["accountNumber"] == "ACC-10006"

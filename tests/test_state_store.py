@@ -98,3 +98,11 @@ def test_store_errors_surface_as_everywire_errors():
                          transport=httpx.MockTransport(lambda r: httpx.Response(401, json={"error": "bad token"})))
     with pytest.raises(EverywireError, match="bad token"):
         run(PersistentMockClient(store).get_policy_view("PA-200001-01"))
+
+
+def test_create_account_persists():
+    fake = FakeUpstash()
+    run(make(fake).create_account("Maria", "Lopez", None, "maria@example.com",
+                                  "12 Oak St", "Springfield", "IL", "62704"))
+    found = run(make(fake).search("/accounts", {"lastName": "Lopez"}))["data"]
+    assert [a["attributes"]["accountNumber"] for a in found] == ["ACC-10006"]

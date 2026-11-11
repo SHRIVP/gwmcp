@@ -332,11 +332,12 @@ class MockEverywireClient:
         self._next_job = 300007
         self._next_vehicle = 5
         self._next_driver = 4
+        self._next_account = 10006
 
     # ------------------------------------------------------------------- state
 
     _STATE_FIELDS = ("accounts", "policies", "jobs", "_details", "_drafts", "_next_job", "_next_vehicle",
-                     "_next_driver")
+                     "_next_driver", "_next_account")
 
     def to_state(self) -> dict:
         """Everything the mock knows, as JSON-safe data (for persisting between requests)."""
@@ -484,6 +485,39 @@ class MockEverywireClient:
         return self._view(num)
 
     # ------------------------------------------------------------- public API
+
+    async def create_account(self, first_name: str | None, last_name: str | None, company_name: str | None,
+                             email: str, address_line1: str, city: str, state: str, postal_code: str,
+                             phone: str | None = None) -> dict:
+        first, last, company = ((x or "").strip() for x in (first_name, last_name, company_name))
+        if company and (first or last):
+            raise EverywireError(400, "Give either a person's first and last name or a company name, not both.")
+        if not company and not (first and last):
+            raise EverywireError(400, "Give the customer's first and last name, or a company name.")
+        email = (email or "").strip()
+        if "@" not in email or email.startswith("@") or email.endswith("@"):
+            raise EverywireError(400, f"{email!r} isn't a valid email address.")
+        line1, city = (address_line1 or "").strip(), (city or "").strip()
+        state, postal = (state or "").strip().upper(), (postal_code or "").strip()
+        if not line1 or not city:
+            raise EverywireError(400, "The mailing address needs a street address and a city.")
+        if len(state) != 2 or not state.isalpha():
+            raise EverywireError(400, f"state must be a 2-letter code like IL, got {state!r}.")
+        digits = postal.replace("-", "")
+        if not (digits.isdigit() and (len(postal) == 5 or (len(postal) == 10 and postal[5] == "-"))):
+            raise EverywireError(400, f"postalCode must be a 5-digit ZIP or ZIP+4, got {postal!r}.")
+
+        number = f"ACC-{self._next_account}"
+        self._next_account += 1
+        attrs = {"accountNumber": number}
+        attrs.update({"companyName": company} if company else {"firstName": first, "lastName": last})
+        attrs["emailAddress"] = email
+        if (phone or "").strip():
+            attrs["phone"] = phone.strip()
+        attrs["primaryAddress"] = {"addressLine1": line1, "city": city, "state": state, "postalCode": postal}
+        account = {"id": f"account:{number}", "attributes": attrs}
+        self.accounts.append(account)
+        return copy.deepcopy(account)
 
     async def get_policy_view(self, policy_number: str) -> dict:
         return self._view(policy_number)

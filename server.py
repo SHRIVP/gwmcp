@@ -132,6 +132,27 @@ SEARCH_TOOLS = [
     ),
 ]
 
+ACCOUNT_TOOLS = [
+    _tool(
+        "create_account", "Create account",
+        "Create a new customer account, for a person (firstName + lastName) or a company (companyName). "
+        "Do this before start_submission when the customer isn't in the system yet; search_accounts first "
+        "to avoid duplicates.",
+        {
+            "firstName": {"type": "string", "description": "First name (person)"},
+            "lastName": {"type": "string", "description": "Last name (person)"},
+            "companyName": {"type": "string", "description": "Company name (company accounts, instead of names)"},
+            "email": {"type": "string", "description": "Contact email address"},
+            "phone": {"type": "string", "description": "Contact phone number, if known"},
+            "addressLine1": {"type": "string", "description": "Mailing street address, e.g. 12 Oak St"},
+            "city": {"type": "string", "description": "Mailing city"},
+            "state": {"type": "string", "description": "2-letter state code, e.g. IL"},
+            "postalCode": {"type": "string", "description": "5-digit ZIP or ZIP+4"},
+        },
+        ["email", "addressLine1", "city", "state", "postalCode"],
+    ),
+]
+
 EDIT_TOOLS = [
     _tool(
         "open_policy", "Open policy",
@@ -217,7 +238,7 @@ EDIT_TOOLS = [
     ),
 ]
 
-TOOLS = SEARCH_TOOLS + EDIT_TOOLS
+TOOLS = SEARCH_TOOLS + ACCOUNT_TOOLS + EDIT_TOOLS
 
 # tool name -> (client method, argument names in call order, headline for Claude)
 EDIT_DISPATCH = {
@@ -274,6 +295,10 @@ def _fmt_account(a_item: dict) -> str:
             lines.append(f"  Name:     {first} {last}".rstrip())
     if email := a.get("emailAddress"):
         lines.append(f"  Email:    {email}")
+    if phone := a.get("phone"):
+        lines.append(f"  Phone:    {phone}")
+    if addr := a.get("primaryAddress"):
+        lines.append(f"  Address:  {addr['addressLine1']}, {addr['city']}, {addr['state']} {addr['postalCode']}")
     return "\n".join(lines)
 
 
@@ -382,7 +407,15 @@ async def call_tool(name: str, arguments: dict):
             return await _call_edit_tool(name, arguments)
 
         client = get_client()
-        if name == "search_policies":
+        if name == "create_account":
+            if not getattr(client, "supports_editing", False):
+                return _error("Creating accounts is only wired up in mock mode (GW_MOCK=true) so far.")
+            acct = await client.create_account(
+                *(arguments.get(k) for k in ("firstName", "lastName", "companyName", "email",
+                                             "addressLine1", "city", "state", "postalCode", "phone")))
+            text = f"Created account {acct['attributes']['accountNumber']}.\n\n{_fmt_account(acct)}"
+
+        elif name == "search_policies":
             result = await client.search(
                 "/policies",
                 {
