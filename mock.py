@@ -220,6 +220,14 @@ COVERAGE_CATALOG: dict[str, tuple[str, dict[str, float]]] = {
     "CPCyber": ("Cyber Liability", {"Not covered": 0, "$250,000": 680, "$1,000,000": 1650}),
 }
 
+# New business: product code -> (display name, policy number prefix, coverage code prefix)
+NEW_BUSINESS_PRODUCTS = {
+    "PersonalAuto": ("Personal Auto", "PA", "PA"),
+    "HomeOwners": ("Homeowners", "HO", "HO"),
+}
+SUBMISSION_BACKDATE_DAYS = 30
+SUBMISSION_LEAD_DAYS = 365
+
 BASE_PREMIUM = {"PersonalAuto": 688.0, "HomeOwners": 1450.0, "CommercialPackage": 8400.0}
 
 # policyNumber -> (vehicles, {coverage code: value})
@@ -285,6 +293,19 @@ def rate(product_code: str, vehicles: list[dict], coverages: list[dict],
     return round(total, 2)
 
 
+def _one_year_after(d: date) -> date:
+    try:
+        return d.replace(year=d.year + 1)
+    except ValueError:  # Feb 29 -> Feb 28
+        return d.replace(year=d.year + 1, day=28)
+
+
+def _standard_coverages(coverage_prefix: str) -> dict[str, str]:
+    """Each of the product's coverages at its standard option (the one with no premium adjustment)."""
+    return {code: next(opt for opt, adj in options.items() if adj == 0)
+            for code, (_name, options) in COVERAGE_CATALOG.items() if code.startswith(coverage_prefix)}
+
+
 def _coverage_rows(values: dict[str, str]) -> list[dict]:
     return [
         {"code": code, "name": COVERAGE_CATALOG[code][0], "value": val,
@@ -323,6 +344,7 @@ class MockEverywireClient:
             self._details[a["policyNumber"]] = {
                 "vehicles": vehicles,
                 "drivers": drivers,
+                "home": None,
                 "coverages": coverages,
                 "premium": rate(a["product"]["code"], vehicles, coverages,
                                 drivers, date.fromisoformat(a["effectiveDate"])),
@@ -333,11 +355,12 @@ class MockEverywireClient:
         self._next_vehicle = 5
         self._next_driver = 4
         self._next_account = 10006
+        self._next_policy = 200007
 
     # ------------------------------------------------------------------- state
 
     _STATE_FIELDS = ("accounts", "policies", "jobs", "_details", "_drafts", "_next_job", "_next_vehicle",
-                     "_next_driver", "_next_account")
+                     "_next_driver", "_next_account", "_next_policy")
 
     def to_state(self) -> dict:
         """Everything the mock knows, as JSON-safe data (for persisting between requests)."""
@@ -349,9 +372,12 @@ class MockEverywireClient:
         for f in cls._STATE_FIELDS:
             if f in state:
                 setattr(client, f, copy.deepcopy(state[f]))
-        # State saved before drivers existed has none on its policies or drafts.
+        # State saved before drivers / home details / submissions existed.
         for rec in (*client._details.values(), *client._drafts.values()):
             rec.setdefault("drivers", [])
+            rec.setdefault("home", None)
+        for draft in client._drafts.values():
+            draft.setdefault("kind", "change")
         return client
 
     # ------------------------------------------------------------------ search
@@ -549,8 +575,10 @@ class MockEverywireClient:
             "description": description or "",
             "vehicles": copy.deepcopy(d["vehicles"]),
             "drivers": copy.deepcopy(d["drivers"]),
+            "home": copy.deepcopy(d["home"]),
             "coverages": copy.deepcopy(d["coverages"]),
             "quote": None,
+            "kind": "change",
         }
         self.jobs.append({
             "id": f"job:{job_number}",
@@ -564,6 +592,58 @@ class MockEverywireClient:
             },
         })
         self._bump(num)
+        return self._view(num)
+
+    async def start_submission(self, account_number: str, product_code: str, effective_date: str,
+                               description: str = "") -> dict:
+        code = next((c for c in NEW_BUSINESS_PRODUCTS if c.lower() == (product_code or "").strip().lower()), None)
+        if not code:
+            raise EverywireError(400, f"New business is available for PersonalAuto or HomeOwners, "
+                                      f"not {product_code!r}.")
+        acct = next((x["attributes"] for x in self.accounts
+                     if x["attributes"]["accountNumber"].lower() == (account_number or "").strip().lower()), None)
+        if not acct:
+            raise EverywireError(404, f"Account {account_number} not found. Create it with create_account first.")
+        try:
+            eff = date.fromisoformat(effective_date)
+        except (TypeError, ValueError):
+            raise EverywireError(400, f"effectiveDate must be YYYY-MM-DD, got {effective_date!r}")
+        today = date.today()
+        if (today - eff).days > SUBMISSION_BACKDATE_DAYS:
+            raise EverywireError(400, f"effectiveDate can't be more than {SUBMISSION_BACKDATE_DAYS} days ago.")
+        if (eff - today).days > SUBMISSION_LEAD_DAYS:
+            raise EverywireError(400, f"effectiveDate can't be more than {SUBMISSION_LEAD_DAYS} days ahead.")
+
+        name, number_prefix, coverage_prefix = NEW_BUSINESS_PRODUCTS[code]
+        num = f"{number_prefix}-{self._next_policy}-01"
+        self._next_policy += 1
+        self.policies.append({
+            "id": f"policy:{num}",
+            "attributes": {
+                "policyNumber": num, "status": "submission",
+                "effectiveDate": eff.isoformat(), "expirationDate": _one_year_after(eff).isoformat(),
+                "product": {"name": name, "code": code},
+                "account": {"accountNumber": acct["accountNumber"]},
+            },
+        })
+        coverages = _coverage_rows(_standard_coverages(coverage_prefix))
+        self._details[num] = {"vehicles": [], "drivers": [], "home": None, "coverages": coverages,
+                              "premium": 0.0, "version": 1}
+        job_number = f"SUB-{self._next_job}"
+        self._next_job += 1
+        self._drafts[num] = {
+            "jobNumber": job_number, "status": "Draft", "effectiveDate": eff.isoformat(),
+            "description": description or "", "vehicles": [], "drivers": [], "home": None,
+            "coverages": copy.deepcopy(coverages), "quote": None, "kind": "submission",
+        }
+        self.jobs.append({
+            "id": f"job:{job_number}",
+            "attributes": {
+                "jobNumber": job_number, "jobType": "Submission", "status": "Draft",
+                "policy": {"policyNumber": num}, "account": {"accountNumber": acct["accountNumber"]},
+                "createTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        })
         return self._view(num)
 
     async def add_vehicle(self, policy_number: str, year: int, make: str, model: str, vin: str | None = None) -> dict:
@@ -632,6 +712,9 @@ class MockEverywireClient:
     async def quote_policy_change(self, policy_number: str) -> dict:
         num, draft = self._draft(policy_number)
         rec = self._record(self._policy(num))
+        submission = draft["kind"] == "submission"
+        if submission and rec["product"]["code"] == "PersonalAuto" and not (draft["vehicles"] and draft["drivers"]):
+            raise EverywireError(400, "Add at least one vehicle and one driver before quoting.")
         start = date.fromisoformat(draft["effectiveDate"])
         new_annual = rate(rec["product"]["code"], draft["vehicles"], draft["coverages"], draft["drivers"], start)
         term_start = date.fromisoformat(rec["effectiveDate"])
@@ -639,7 +722,7 @@ class MockEverywireClient:
         fraction = (term_end - start).days / (term_end - term_start).days
         draft["quote"] = {
             "annualPremium": new_annual,
-            "changeInCost": round((new_annual - rec["premium"]) * fraction, 2),
+            "changeInCost": new_annual if submission else round((new_annual - rec["premium"]) * fraction, 2),
         }
         draft["status"] = "Quoted"
         self._set_job_status(draft["jobNumber"], "Quoted")
@@ -653,8 +736,12 @@ class MockEverywireClient:
         d = self._details[num]
         d["vehicles"] = draft["vehicles"]
         d["drivers"] = draft["drivers"]
+        d["home"] = draft["home"]
         d["coverages"] = draft["coverages"]
         d["premium"] = draft["quote"]["annualPremium"]
+        if draft["kind"] == "submission":
+            a = self._policy(num)["attributes"]
+            a["status"] = "inForce" if date.fromisoformat(a["effectiveDate"]) <= date.today() else "scheduled"
         self._set_job_status(draft["jobNumber"], "Bound")
         del self._drafts[num]
         self._bump(num)
@@ -663,6 +750,8 @@ class MockEverywireClient:
     async def withdraw_policy_change(self, policy_number: str) -> dict:
         num, draft = self._draft(policy_number)
         self._set_job_status(draft["jobNumber"], "Withdrawn")
+        if draft["kind"] == "submission":
+            self._policy(num)["attributes"]["status"] = "withdrawn"
         del self._drafts[num]
         self._bump(num)
         return self._view(num)

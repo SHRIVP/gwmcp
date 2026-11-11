@@ -24,6 +24,7 @@ Open policy change (draft job)::
 
     {
       "jobNumber", "status" ("Draft" | "Quoted"), "effectiveDate", "description",
+      "kind": "change" | "submission",          # submission = new business
       "vehicles": [...], "drivers": [...], "coverages": [...],  # full proposed state
       "quote": {"annualPremium", "changeInCost"} | None,
     }
@@ -72,6 +73,7 @@ def build_policy_view(policy: dict, draft: dict | None, jobs: list[dict]) -> dic
     }
     if draft:
         view["draft"] = {
+            "kind": draft.get("kind", "change"),
             "jobNumber": draft["jobNumber"],
             "status": draft["status"],
             "effectiveDate": draft["effectiveDate"],
@@ -122,7 +124,8 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
     d = view.get("draft")
     if d:
         lines.append("")
-        lines.append(f"Open policy change {d['jobNumber']} · {d['status']} · effective {d['effectiveDate']}")
+        title = "New submission" if d["kind"] == "submission" else "Open policy change"
+        lines.append(f"{title} {d['jobNumber']} · {d['status']} · effective {d['effectiveDate']}")
         if d["description"]:
             lines.append(f"  Description: {d['description']}")
         changes = [f"  + added {_vehicle_label(v)}" for v in d["vehicles"] if v["change"] == "added"]
@@ -135,11 +138,15 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
         lines += changes or ["  (no changes yet)"]
         if d["quote"]:
             q = d["quote"]
-            lines.append(
-                f"  Quoted: new annual premium {_money(q['annualPremium'])}, "
-                f"change in cost for remaining term {_money(q['changeInCost'])}"
-            )
-            lines.append("  The user binds the change with the Bind button in the Policy System view.")
+            if d["kind"] == "submission":
+                lines.append(f"  Quoted: annual premium {_money(q['annualPremium'])}")
+                lines.append("  The user binds the new policy with the Bind button in the Policy System view.")
+            else:
+                lines.append(
+                    f"  Quoted: new annual premium {_money(q['annualPremium'])}, "
+                    f"change in cost for remaining term {_money(q['changeInCost'])}"
+                )
+                lines.append("  The user binds the change with the Bind button in the Policy System view.")
         else:
             lines.append("  Not quoted yet — call quote_policy_change when the edits are done.")
     elif view["canEdit"]:

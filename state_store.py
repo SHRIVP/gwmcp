@@ -99,6 +99,9 @@ class PersistentMockClient:
     async def create_account(self, *a):
         return await self._run("create_account", *a, write=True)
 
+    async def start_submission(self, *a):
+        return await self._run("start_submission", *a, write=True)
+
     async def start_policy_change(self, *a):
         return await self._run("start_policy_change", *a, write=True)
 

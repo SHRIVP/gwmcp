@@ -1,8 +1,10 @@
 import asyncio
+from datetime import date, timedelta
+
 import pytest
 
 from client import EverywireError
-from mock import MockEverywireClient
+from mock import MockEverywireClient, _one_year_after
 from views import policy_view_text
 
 
@@ -200,3 +202,141 @@ def test_old_state_without_account_counter_loads(gw):
     state.pop("_next_account", None)
     restored = MockEverywireClient.from_state(state)
     assert run(restored.create_account(**MARIA))["attributes"]["accountNumber"] == "ACC-10006"
+
+
+def days(n: int) -> str:
+    return (date.today() + timedelta(days=n)).isoformat()
+
+
+def test_start_submission_creates_draft_policy(gw):
+    v = run(gw.start_submission("ACC-10001", "PersonalAuto", days(10), "New car policy"))
+    assert v["policyNumber"] == "PA-200007-01"
+    assert v["status"] == "submission" and v["premium"] == 0.0
+    assert v["expirationDate"] == _one_year_after(date.fromisoformat(days(10))).isoformat()
+    d = v["draft"]
+    assert d["kind"] == "submission" and d["status"] == "Draft" and d["jobNumber"].startswith("SUB-")
+    assert {c["code"]: c["value"] for c in d["coverages"]} == {
+        "PALiability": "100/300", "PACollision": "$500 deductible",
+        "PAComprehensive": "$500 deductible", "PARoadside": "Not covered"}
+    jobs = run(gw.search("/jobs", {"jobType": "Submission", "status": "Draft"}))["data"]
+    assert d["jobNumber"] in [j["attributes"]["jobNumber"] for j in jobs]
+    assert "New submission" in policy_view_text(v)
+
+
+def test_homeowners_submission_numbering_and_coverages(gw):
+    run(gw.start_submission("ACC-10001", "PersonalAuto", days(10)))
+    v = run(gw.start_submission("ACC-10001", "HomeOwners", days(10)))
+    assert v["policyNumber"] == "HO-200008-01"
+    assert {c["code"]: c["value"] for c in v["draft"]["coverages"]} == {
+        "HODwelling": "$350,000", "HODeductible": "$1,000", "HOWaterBackup": "Not covered"}
+
+
+def test_auto_submission_quote_requires_vehicle_and_driver(gw):
+    num = run(gw.start_submission("ACC-10001", "PersonalAuto", days(10)))["policyNumber"]
+    with pytest.raises(EverywireError, match="one vehicle and one driver"):
+        run(gw.quote_policy_change(num))
+    run(gw.add_vehicle(num, 2024, "Honda", "Civic"))
+    with pytest.raises(EverywireError, match="one vehicle and one driver"):
+        run(gw.quote_policy_change(num))
+
+
+def test_auto_submission_quote_and_bind(gw):
+    num = run(gw.start_submission("ACC-10001", "PersonalAuto", days(0)))["policyNumber"]
+    run(gw.add_vehicle(num, 2024, "Honda", "Civic"))
+    run(gw.add_driver(num, "Maria", "Lopez", "1985-02-03"))
+    q = run(gw.quote_policy_change(num))
+    assert q["draft"]["quote"]["annualPremium"] == 688 + 420 + 9 * 12 == 1216.0
+    assert q["draft"]["quote"]["changeInCost"] == 1216.0
+    text = policy_view_text(q)
+    assert "Quoted: annual premium $1,216.00" in text and "change in cost" not in text
+    v = run(gw.bind_policy_change(num))
+    assert v["policyNumber"] == num and v["status"] == "inForce"
+    assert v["premium"] == 1216.0 and v["draft"] is None
+    assert [x["model"] for x in v["vehicles"]] == ["Civic"]
+    job = next(j for j in v["jobs"] if j["jobType"] == "Submission")
+    assert job["status"] == "Bound"
+    found = run(gw.search("/policies", {"policyNumber": num}))["data"]
+    assert found[0]["attributes"]["status"] == "inForce"
+
+
+def test_future_submission_binds_scheduled(gw):
+    num = run(gw.start_submission("ACC-10001", "PersonalAuto", days(60)))["policyNumber"]
+    run(gw.add_vehicle(num, 2024, "Honda", "Civic"))
+    run(gw.add_driver(num, "Maria", "Lopez", "1985-02-03"))
+    run(gw.quote_policy_change(num))
+    assert run(gw.bind_policy_change(num))["status"] == "scheduled"
+
+
+def test_bound_submission_can_then_be_changed(gw):
+    num = run(gw.start_submission("ACC-10001", "PersonalAuto", days(0)))["policyNumber"]
+    run(gw.add_vehicle(num, 2024, "Honda", "Civic"))
+    run(gw.add_driver(num, "Maria", "Lopez", "1985-02-03"))
+    run(gw.quote_policy_change(num))
+    run(gw.bind_policy_change(num))
+    v = run(gw.start_policy_change(num, days(5)))
+    assert v["draft"]["kind"] == "change"
+
+
+def test_feb_29_term():
+    assert _one_year_after(date(2028, 2, 29)) == date(2029, 2, 28)
+    assert _one_year_after(date(2026, 12, 1)) == date(2027, 12, 1)
+
+
+def test_withdrawn_submission(gw):
+    num = run(gw.start_submission("ACC-10001", "PersonalAuto", days(10)))["policyNumber"]
+    v = run(gw.withdraw_policy_change(num))
+    assert v["status"] == "withdrawn" and v["draft"] is None
+    assert next(j for j in v["jobs"] if j["jobType"] == "Submission")["status"] == "Withdrawn"
+    with pytest.raises(EverywireError, match="no open policy change"):
+        run(gw.add_vehicle(num, 2024, "Honda", "Civic"))
+    with pytest.raises(EverywireError, match="withdrawn") as e:
+        run(gw.start_policy_change(num, days(12)))
+    assert e.value.status == 409
+
+
+def test_cannot_start_change_on_open_submission(gw):
+    num = run(gw.start_submission("ACC-10001", "PersonalAuto", days(10)))["policyNumber"]
+    with pytest.raises(EverywireError) as e:
+        run(gw.start_policy_change(num, days(12)))
+    assert e.value.status == 409
+
+
+@pytest.mark.parametrize("acct, product, eff, match", [
+    ("ACC-10001", "CommercialPackage", 10, "PersonalAuto or HomeOwners"),
+    ("ACC-99999", "PersonalAuto", 10, "not found"),
+    ("ACC-10001", "PersonalAuto", -31, "30 days"),
+    ("ACC-10001", "PersonalAuto", 366, "365 days"),
+])
+def test_start_submission_validation(gw, acct, product, eff, match):
+    with pytest.raises(EverywireError, match=match):
+        run(gw.start_submission(acct, product, days(eff)))
+
+
+def test_start_submission_bad_date(gw):
+    with pytest.raises(EverywireError, match="YYYY-MM-DD"):
+        run(gw.start_submission("ACC-10001", "PersonalAuto", "12/01/2026"))
+
+
+def test_new_account_submission(gw):
+    acct = run(gw.create_account(**MARIA))["attributes"]["accountNumber"]
+    v = run(gw.start_submission(acct, "homeowners", days(10)))
+    assert v["account"]["name"] == "Maria Lopez" and v["product"]["code"] == "HomeOwners"
+
+
+def test_policy_change_kind(gw):
+    v = run(gw.start_policy_change("PA-200001-01", "2026-12-01"))
+    assert v["draft"]["kind"] == "change"
+    run(gw.add_vehicle("PA-200001-01", 2024, "Honda", "Civic"))
+    q = run(gw.quote_policy_change("PA-200001-01"))["draft"]["quote"]
+    assert q["changeInCost"] != q["annualPremium"]
+
+
+def test_old_state_drafts_get_kind(gw):
+    run(gw.start_policy_change("PA-200001-01", "2026-12-01"))
+    state = gw.to_state()
+    for d in state["_drafts"].values():
+        d.pop("kind")
+    state.pop("_next_policy", None)
+    restored = MockEverywireClient.from_state(state)
+    assert run(restored.get_policy_view("PA-200001-01"))["draft"]["kind"] == "change"
+    assert run(restored.start_submission("ACC-10001", "PersonalAuto", days(1)))["policyNumber"] == "PA-200007-01"

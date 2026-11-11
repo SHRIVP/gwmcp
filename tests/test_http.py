@@ -101,3 +101,30 @@ def test_legacy_sse_and_preview_still_served(base_url):
         first = next(r.iter_lines())
         assert first.startswith("event: endpoint")
     assert httpx.get(f"{base_url}/preview").status_code == 200
+
+
+def test_new_business_auto_over_http(base_url):
+    from datetime import date, timedelta
+    eff = (date.today() + timedelta(days=10)).isoformat()
+
+    async def go(s):
+        out = {"tools": {t.name: t for t in (await s.list_tools()).tools}}
+        out["acct"] = await s.call_tool("create_account", {
+            "firstName": "Ana", "lastName": "Ortiz", "email": "ana@example.com",
+            "addressLine1": "1 Elm St", "city": "Austin", "state": "TX", "postalCode": "78701"})
+        acct = out["acct"].content[0].text.split("Created account ")[1].split(".")[0]
+        out["start"] = await s.call_tool("start_submission",
+                                         {"accountNumber": acct, "productCode": "PersonalAuto", "effectiveDate": eff})
+        num = out["start"].structuredContent["policyNumber"]
+        await s.call_tool("add_vehicle", {"policyNumber": num, "year": 2022, "make": "Mazda", "model": "3"})
+        await s.call_tool("add_driver", {"policyNumber": num, "firstName": "Ana", "lastName": "Ortiz",
+                                         "dateOfBirth": "1990-05-05"})
+        out["quote"] = await s.call_tool("quote_policy_change", {"policyNumber": num})
+        return out
+
+    out = asyncio.run(_session_run(base_url, go))
+    assert not out["acct"].isError and "Created account ACC-" in out["acct"].content[0].text
+    assert out["tools"]["start_submission"].meta["ui"]["resourceUri"] == "ui://gwmcp/policy-view.html"
+    assert out["tools"]["create_account"].meta is None
+    d = out["quote"].structuredContent["draft"]
+    assert d["kind"] == "submission" and d["quote"]["annualPremium"] > 0

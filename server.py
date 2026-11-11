@@ -89,7 +89,8 @@ SEARCH_TOOLS = [
             "policyNumber": {"type": "string", "description": "Exact policy number (e.g. 01-123456-01)"},
             "accountNumber": {"type": "string",
                               "description": "Account number — returns all policies under that account"},
-            "status": {"type": "string", "enum": ["inForce", "expired", "canceled", "scheduled"],
+            "status": {"type": "string",
+                       "enum": ["inForce", "expired", "canceled", "scheduled", "submission", "withdrawn"],
                        "description": "Policy status filter"},
             "effectiveDateStart": {"type": "string", "description": "Effective date range start (YYYY-MM-DD)"},
             "effectiveDateEnd": {"type": "string", "description": "Effective date range end (YYYY-MM-DD)"},
@@ -161,6 +162,22 @@ EDIT_TOOLS = [
         {"policyNumber": POLICY_NUMBER}, ["policyNumber"], ui=True, read_only=True,
     ),
     _tool(
+        "start_submission", "Start new submission",
+        "Start a new-business submission (a new policy) for an account: Personal Auto or Homeowners. "
+        "For a new customer, call create_account first. Then build it with add_vehicle / add_driver (auto) "
+        "or set_home_details (homeowners) and update_coverage, and quote it with quote_policy_change. "
+        "The user binds it from the Policy System view.",
+        {
+            "accountNumber": {"type": "string", "description": "Account number, e.g. ACC-10006"},
+            "productCode": {"type": "string", "enum": ["PersonalAuto", "HomeOwners"],
+                            "description": "Product for the new policy"},
+            "effectiveDate": {"type": "string", "description": "Date the policy starts (YYYY-MM-DD); "
+                                                               "up to 30 days back or 365 days ahead"},
+            "description": {"type": "string", "description": "Short note, e.g. 'New home purchase'"},
+        },
+        ["accountNumber", "productCode", "effectiveDate"], ui=True,
+    ),
+    _tool(
         "start_policy_change", "Start policy change",
         "Start a policy change (endorsement) on an in-force or scheduled policy. Required before any edit; "
         "edits stay in this draft and don't touch the live policy until the user binds it.",
@@ -220,20 +237,20 @@ EDIT_TOOLS = [
     ),
     _tool(
         "quote_policy_change", "Quote policy change",
-        "Quote the open policy change to get the new annual premium and the change in cost. "
-        "After quoting, the user reviews the change and binds it from the Policy System view.",
+        "Quote the open policy change or new submission to get the annual premium (and, for a change, "
+        "the change in cost). After quoting, the user reviews it and binds it from the Policy System view.",
         {"policyNumber": POLICY_NUMBER}, ["policyNumber"], ui=True,
     ),
     _tool(
         "withdraw_policy_change", "Withdraw policy change",
-        "Withdraw (discard) the open policy change. The live policy is left unchanged.",
+        "Withdraw (discard) the open policy change or new submission. A live policy is left unchanged.",
         {"policyNumber": POLICY_NUMBER}, ["policyNumber"], ui=True, destructive=True,
     ),
     # Only the view's Bind button can call this: binding applies the change to the
     # live policy, so a person makes that call, not Claude.
     _tool(
         "bind_policy_change", "Bind policy change",
-        "Bind the quoted policy change so it applies to the live policy.",
+        "Bind the quoted policy change or new submission so it applies to the live policy.",
         {"policyNumber": POLICY_NUMBER}, ["policyNumber"], ui=True, app_only=True, destructive=True,
     ),
 ]
@@ -243,6 +260,8 @@ TOOLS = SEARCH_TOOLS + ACCOUNT_TOOLS + EDIT_TOOLS
 # tool name -> (client method, argument names in call order, headline for Claude)
 EDIT_DISPATCH = {
     "open_policy": ("get_policy_view", ["policyNumber"], None),
+    "start_submission": ("start_submission", ["accountNumber", "productCode", "effectiveDate", "description"],
+                         "Started a new submission."),
     "start_policy_change": ("start_policy_change", ["policyNumber", "effectiveDate", "description"],
                             "Started a policy change."),
     "add_vehicle": ("add_vehicle", ["policyNumber", "year", "make", "model", "vin"], "Added the vehicle."),
