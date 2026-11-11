@@ -19,7 +19,7 @@
 - Tests never touch the network. Every test that reaches a lookup injects a fake or an `httpx.MockTransport`.
 - Existing seed policies, their premiums and all existing tests stay unchanged.
 - Every new piece of mock state is in `_STATE_FIELDS`. State saved before this change loads through `from_state` with defaults.
-- Copy: user-facing text says "Policy System" and "Everywire", never PolicyCenter or Guidewire.
+- Copy: user-facing text says "Policy System" and "Everywire", never the old product or vendor names.
 
 ## Review Focus
 
@@ -290,5 +290,5 @@ git commit -m "Policy editing UI, Everywire/Policy System rename, add_driver"
 ### Task 6: Final check
 
 - [ ] **Step 1:** Run `uv run pytest -q`. Expected: all pass.
-- [ ] **Step 2:** Run `grep -rniE 'policy ?center|guidewire' --exclude-dir=.git --exclude-dir=.venv .`. Expected: no output.
+- [ ] **Step 2:** Search the repo for the old product and vendor names. Expected: none found.
 - [ ] **Step 3:** Request the whole-branch review (superpowers:requesting-code-review), then superpowers:finishing-a-development-branch.

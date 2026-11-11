@@ -5,7 +5,7 @@ Status: draft for review · 2026-11-11
 ## Intent
 
 Everywire is a (fictional) insurance company. A business user, someone who would
-normally work in a Guidewire-style policy system, wants to sell new business from
+normally work in a traditional policy administration system, wants to sell new business from
 inside Claude. That means creating an account for a new customer, building a
 submission, quoting it and binding it into an in-force policy.
 
