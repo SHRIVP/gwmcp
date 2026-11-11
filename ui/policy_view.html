@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Policy System</title>
+<style>
+  :root {
+    --bg: var(--color-background-primary, #ffffff);
+    --bg-2: var(--color-background-secondary, #f6f6f4);
+    --text: var(--color-text-primary, #1f1f1e);
+    --text-2: var(--color-text-secondary, #5e5d59);
+    --border: var(--color-border-tertiary, #e3e2dd);
+    --border-strong: var(--color-border-secondary, #cfcdc6);
+    --warn: var(--color-text-warning, #a35c00);
+    --warn-bg: var(--color-background-warning, #fff4e0);
+    --warn-border: var(--color-border-warning, #e9a23b);
+    --ok: var(--color-text-success, #1f7a43);
+    --ok-bg: var(--color-background-success, #e7f6ec);
+    --danger: var(--color-text-danger, #b3261e);
+    --danger-bg: var(--color-background-danger, #fdecea);
+    --info: var(--color-text-info, #1d5fbf);
+    --radius: var(--border-radius-md, 8px);
+    --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+    --mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: var(--color-background-primary, #262624);
+      --bg-2: var(--color-background-secondary, #30302e);
+      --text: var(--color-text-primary, #f0efea);
+      --text-2: var(--color-text-secondary, #b7b5a9);
+      --border: var(--color-border-tertiary, #3e3e3a);
+      --border-strong: var(--color-border-secondary, #55554f);
+      --warn: var(--color-text-warning, #f2b45a);
+      --warn-bg: var(--color-background-warning, #3a2c14);
+      --ok: var(--color-text-success, #6fcf97);
+      --ok-bg: var(--color-background-success, #17301f);
+      --danger: var(--color-text-danger, #f28b82);
+      --danger-bg: var(--color-background-danger, #3b1d1b);
+      --info: var(--color-text-info, #8ab4f8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: var(--color-background-primary, #262624);
+    --bg-2: var(--color-background-secondary, #30302e);
+    --text: var(--color-text-primary, #f0efea);
+    --text-2: var(--color-text-secondary, #b7b5a9);
+    --border: var(--color-border-tertiary, #3e3e3a);
+    --border-strong: var(--color-border-secondary, #55554f);
+    --warn: var(--color-text-warning, #f2b45a);
+    --warn-bg: var(--color-background-warning, #3a2c14);
+    --ok: var(--color-text-success, #6fcf97);
+    --ok-bg: var(--color-background-success, #17301f);
+    --danger: var(--color-text-danger, #f28b82);
+    --danger-bg: var(--color-background-danger, #3b1d1b);
+    --info: var(--color-text-info, #8ab4f8);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+  body { padding: 14px 16px 18px; }
+  button { font: inherit; }
+  .muted { color: var(--text-2); }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  header { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+  .eyebrow { font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); }
+  h1 { font-size: 17px; margin: 2px 0 2px; font-weight: 600; }
+  .sub { color: var(--text-2); font-size: 13px; }
+  .head-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+  .live { font-size: 12px; color: var(--text-2); display: none; align-items: center; gap: 5px; }
+  .live.on { display: inline-flex; }
+  .live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500;
+           background: var(--bg-2); color: var(--text-2); border: 1px solid var(--border); }
+  .badge.inForce, .badge.Bound { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+  .badge.Draft, .badge.scheduled { background: var(--bg-2); color: var(--info); }
+  .badge.Quoted { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+  .badge.canceled, .badge.expired, .badge.Withdrawn { color: var(--text-2); }
+
+  .btn { border: 1px solid var(--border-strong); background: var(--bg); color: var(--text);
+         padding: 6px 12px; border-radius: var(--radius); cursor: pointer; }
+  .btn:hover:not(:disabled) { background: var(--bg-2); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .btn.primary:hover:not(:disabled) { opacity: .88; background: var(--text); }
+  .btn.confirm, .btn.confirm:hover:not(:disabled) { background: var(--warn); border-color: var(--warn); color: var(--bg); }
+  .btn.confirm:hover:not(:disabled) { opacity: .88; }
+  .btn.ghost { border-color: transparent; padding: 4px 8px; color: var(--text-2); }
+
+  .banner { margin-top: 12px; padding: 8px 12px; border-radius: var(--radius); font-size: 13px; }
+  .banner.error { background: var(--danger-bg); color: var(--danger); }
+  .banner.ok { background: var(--ok-bg); color: var(--ok); }
+
+  .change { margin-top: 14px; border: 1.5px solid var(--warn-border); border-radius: calc(var(--radius) + 2px);
+            padding: 12px 14px; background: color-mix(in srgb, var(--warn-bg) 45%, var(--bg)); }
+  .change-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+  .change-title { font-weight: 600; }
+  .change ul { margin: 8px 0 0; padding: 0; list-style: none; }
+  .change li { padding: 2px 0; }
+  .add { color: var(--ok); }
+  .rem { color: var(--danger); }
+  .premium { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 10px; font-size: 13px; }
+  .premium b { font-size: 15px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+  .hint { font-size: 12.5px; color: var(--text-2); }
+
+  section { margin-top: 18px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2);
+       font-weight: 600; margin: 0 0 6px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 7px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  td:last-child { text-align: right; }
+  tr.added td { color: var(--ok); }
+  tr.removed td { color: var(--danger); text-decoration: line-through; }
+  .tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-left: 6px;
+         text-decoration: none; display: inline-block; }
+  s { color: var(--text-2); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+  .empty { padding: 28px 0; text-align: center; color: var(--text-2); }
+  body.compact .grid { grid-template-columns: 1fr; }
+  body.compact h1 { font-size: 16px; }
+</style>
+</head>
+<body>
+<div id="root"><div class="empty">Loading Policy System…</div></div>
+
+<script type="module">
+  import {
+    App, applyDocumentTheme, applyHostStyleVariables, applyHostFonts,
+  } from "https://unpkg.com/@modelcontextprotocol/ext-apps@1.7.5/dist/src/app-with-deps.js";
+
+  const POLL_MS = 4000;
+  const root = document.getElementById("root");
+  // "fullscreen" only (no "inline"): Claude shows a card in the conversation and opens
+  // this view in the right-hand side panel by itself. Where the side panel isn't
+  // available yet, Claude falls back to showing the view in the conversation.
+  const app = new App({ name: "Policy System view", version: "1.0.0" },
+                      { availableDisplayModes: ["fullscreen"] });
+
+  let view = null;            // last policy view from the server
+  let policyNumber = null;    // policy this view shows
+  let banner = null;          // { kind: "error" | "ok", text }
+  let busy = false;           // a button action is running
+  let confirmingBind = false; // Bind needs a second click
+  let pollTimer = null;
+
+  // ------------------------------------------------------------ helpers
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const money = (n) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US",
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const signed = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US",
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const statusLabel = { inForce: "In force", scheduled: "Scheduled", canceled: "Canceled", expired: "Expired" };
+  const vehicleLabel = (v) => `${v.year} ${esc(v.make)} ${esc(v.model)}`;
+  const driverLabel = (x) => `${esc(x.firstName)} ${esc(x.lastName)}`;
+  const textOf = (result) => (result?.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+
+  function hostContext() { return app.getHostContext?.() || {}; }
+  function isExpanded() { return hostContext().displayMode === "fullscreen"; }
+
+  // ------------------------------------------------------------ render
+  function render() {
+    if (!view) {
+      root.innerHTML = banner
+        ? `<div class="banner ${banner.kind}">${esc(banner.text)}</div>`
+        : `<div class="empty">${policyNumber ? `Opening ${esc(policyNumber)}…` : "Loading Policy System…"}</div>`;
+      return;
+    }
+    const v = view, d = v.draft;
+    const ctx = hostContext();
+    const canExpand = (ctx.availableDisplayModes || []).includes("fullscreen") && !isExpanded();
+
+    const vehicles = d ? d.vehicles : v.vehicles.map((x) => ({ ...x, change: null }));
+    const drivers = d ? (d.drivers || []) : (v.drivers || []).map((x) => ({ ...x, change: null }));
+    const coverages = d ? d.coverages : v.coverages.map((x) => ({ ...x, change: null }));
+
+    let html = `
+      <header>
+        <div>
+          <div class="eyebrow">Policy System · ${esc(v.product.name)}</div>
+          <h1>${esc(v.policyNumber)} <span class="badge ${esc(v.status)}">${esc(statusLabel[v.status] || v.status)}</span></h1>
+          <div class="sub">${esc(v.account.name)} · ${esc(v.account.accountNumber)} · ${esc(v.effectiveDate)} → ${esc(v.expirationDate)}</div>
+        </div>
+        <div class="head-actions">
+          <span class="live ${pollTimer ? "on" : ""}" title="Refreshing every few seconds">Live</span>
+          <button class="btn ghost" data-act="refresh" title="Refresh" ${busy ? "disabled" : ""}>↻</button>
+          ${canExpand ? `<button class="btn" data-act="expand">Expand</button>` : ""}
+        </div>
+      </header>`;
+
+    if (banner) html += `<div class="banner ${banner.kind}">${esc(banner.text)}</div>`;
+
+    if (d) {
+      const changes = [
+        ...d.vehicles.filter((x) => x.change === "added").map((x) => `<li class="add">+ ${vehicleLabel(x)}${x.vin ? ` <span class="mono">${esc(x.vin)}</span>` : ""}</li>`),
+        ...d.vehicles.filter((x) => x.change === "removed").map((x) => `<li class="rem">− ${vehicleLabel(x)}</li>`),
+        ...(d.drivers || []).filter((x) => x.change === "added").map((x) => `<li class="add">+ Driver ${driverLabel(x)} <span class="muted">born ${esc(x.dateOfBirth)}</span></li>`),
+        ...(d.drivers || []).filter((x) => x.change === "removed").map((x) => `<li class="rem">− Driver ${driverLabel(x)}</li>`),
+        ...d.coverages.filter((x) => x.change).map((x) => `<li>${esc(x.name)}: <s>${esc(x.previousValue)}</s> → <b>${esc(x.value)}</b></li>`),
+      ];
+      const q = d.quote;
+      html += `
+        <div class="change">
+          <div class="change-top">
+            <span class="change-title">Policy change ${esc(d.jobNumber)}</span>
+            <span class="badge ${esc(d.status)}">${esc(d.status)}</span>
+          </div>
+          <div class="sub">Effective ${esc(d.effectiveDate)}${d.description ? " · " + esc(d.description) : ""}</div>
+          <ul>${changes.join("") || `<li class="muted">No changes yet. Ask Claude to make one.</li>`}</ul>
+          <div class="premium">
+            ${q
+              ? `<span>Annual premium <s>${money(v.premium)}</s> → <b>${money(q.annualPremium)}</b></span>
+                 <span>Change for remaining term <b>${signed(q.changeInCost)}</b></span>`
+              : `<span class="muted">Annual premium ${money(v.premium)} · not quoted yet</span>`}
+          </div>
+          <div class="actions">
+            ${q
+              ? `<button class="btn ${confirmingBind ? "confirm" : "primary"}" data-act="bind" ${busy ? "disabled" : ""}>
+                   ${confirmingBind ? `Confirm: bind ${signed(q.changeInCost)}` : "Bind change"}</button>
+                 ${confirmingBind ? `<button class="btn" data-act="cancel-bind" ${busy ? "disabled" : ""}>Cancel</button>` : ""}`
+              : `<button class="btn primary" disabled title="Ask Claude to quote the change first">Bind change</button>`}
+            <button class="btn" data-act="withdraw" ${busy ? "disabled" : ""}>Withdraw</button>
+            <span class="hint">${q ? "Nothing changes on the live policy until you bind." : "Ask Claude to quote it when the edits are done."}</span>
+          </div>
+        </div>`;
+    } else if (v.canEdit) {
+      html += `<p class="hint" style="margin-top:12px">No open policy change. Ask Claude, e.g. “add a 2024 Honda Civic from Dec 1”.</p>`;
+    }
+
+    html += `<div class="grid">`;
+    if (v.product.code === "PersonalAuto") {
+      html += `<section><h2>Vehicles</h2><table>${vehicles.map((x) => `
+        <tr class="${x.change || ""}">
+          <td>${vehicleLabel(x)}${x.change ? `<span class="tag">${x.change}</span>` : ""}<div class="muted mono">${esc(x.vin || "No VIN")}</div></td>
+          <td class="muted mono">${esc(x.id)}</td>
+        </tr>`).join("")}</table></section>`;
+      html += `<section><h2>Drivers</h2><table>${drivers.map((x) => `
+        <tr class="${x.change || ""}">
+          <td>${driverLabel(x)}${x.change ? `<span class="tag">${x.change}</span>` : ""}<div class="muted">Born ${esc(x.dateOfBirth)}${x.licenseNumber ? ` · <span class="mono">${esc(x.licenseNumber)}</span>` : ""}</div></td>
+          <td class="muted mono">${esc(x.id)}</td>
+        </tr>`).join("") || `<tr><td class="muted">No drivers listed</td></tr>`}</table></section>`;
+    }
+    html += `<section><h2>Coverages</h2><table>${coverages.map((x) => `
+        <tr>
+          <td>${esc(x.name)}</td>
+          <td>${x.change ? `<s>${esc(x.previousValue)}</s> → <b>${esc(x.value)}</b>` : esc(x.value)}</td>
+        </tr>`).join("")}</table></section>`;
+    html += `<section><h2>Premium</h2><table><tr><td>Annual premium</td><td><b>${money(v.premium)}</b></td></tr></table></section>`;
+    if (v.jobs?.length) {
+      html += `<section><h2>Recent jobs</h2><table>${v.jobs.slice(0, 5).map((j) => `
+        <tr><td>${esc(j.jobNumber)} <span class="muted">· ${esc(j.jobType)}</span></td>
+            <td><span class="badge ${esc(j.status)}">${esc(j.status)}</span></td></tr>`).join("")}</table></section>`;
+    }
+    html += `</div>`;
+    root.innerHTML = html;
+  }
+
+  // ------------------------------------------------------------ data
+  function show(result, { quiet = false } = {}) {
+    const sc = result?.structuredContent;
+    if (sc && sc.policyNumber) {
+      const changed = !view || view.version !== sc.version || view.policyNumber !== sc.policyNumber;
+      view = sc;
+      policyNumber = sc.policyNumber;
+      if (!quiet) banner = null;
+      if (!view.draft || !view.draft.quote) confirmingBind = false;
+      if (changed || !quiet) render();
+      return true;
+    }
+    if (result?.isError) {
+      banner = { kind: "error", text: textOf(result) || "Policy System returned an error." };
+      render();
+    }
+    return false;
+  }
+
+  async function callTool(name) {
+    return app.callServerTool({ name, arguments: { policyNumber } });
+  }
+
+  async function refresh({ quiet = true } = {}) {
+    if (!policyNumber || busy) return;
+    try { show(await callTool("open_policy"), { quiet }); }
+    catch (e) { if (!quiet) { banner = { kind: "error", text: String(e?.message || e) }; render(); } }
+  }
+
+  function updatePolling() {
+    const want = isExpanded() && document.visibilityState === "visible" && !!policyNumber;
+    if (want && !pollTimer) pollTimer = setInterval(() => refresh(), POLL_MS);
+    if (!want && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  async function act(name, doneText) {
+    busy = true; render();
+    try {
+      const result = await callTool(name);
+      busy = false; confirmingBind = false;
+      if (show(result)) {
+        banner = { kind: "ok", text: doneText };
+        render();
+        // Tell Claude what the user did, so its next reply knows.
+        try {
+          await app.updateModelContext({ content: [{ type: "text", text:
+            `The user clicked "${name === "bind_policy_change" ? "Bind" : "Withdraw"}" in the Policy System view. ${textOf(result)}` }] });
+        } catch { /* host may not support model context updates */ }
+      }
+    } catch (e) {
+      busy = false;
+      banner = { kind: "error", text: String(e?.message || e) };
+      render();
+    }
+  }
+
+  root.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn || btn.disabled) return;
+    const a = btn.dataset.act;
+    if (a === "expand") {
+      try { await app.requestDisplayMode({ mode: "fullscreen" }); } catch {}
+      return;
+    }
+    if (a === "refresh") { banner = null; return refresh({ quiet: false }); }
+    if (a === "cancel-bind") { confirmingBind = false; return render(); }
+    if (a === "bind") {
+      if (!confirmingBind) { confirmingBind = true; return render(); }
+      return act("bind_policy_change", `Bound. ${policyNumber} now reflects the change.`);
+    }
+    if (a === "withdraw") return act("withdraw_policy_change", "Policy change withdrawn. The policy is unchanged.");
+  });
+
+  // ------------------------------------------------------------ host wiring
+  function applyContext(ctx) {
+    if (!ctx) return;
+    if (ctx.theme) applyDocumentTheme(ctx.theme);
+    if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+    if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
+    const ins = ctx.safeAreaInsets;
+    if (ins) document.body.style.padding = `${14 + (ins.top || 0)}px ${16 + (ins.right || 0)}px ${18 + (ins.bottom || 0)}px ${16 + (ins.left || 0)}px`;
+    const w = ctx.containerDimensions?.width;
+    document.body.classList.toggle("compact", typeof w === "number" && w < 560);
+  }
+
+  // Handlers go on before connect() so the first tool input/result isn't missed.
+  app.ontoolinput = ({ arguments: args }) => {
+    if (args?.policyNumber && !view) { policyNumber = args.policyNumber; render(); }
+  };
+  app.ontoolresult = (result) => {
+    if (!show(result) && result?.isError && policyNumber) refresh({ quiet: true });
+    updatePolling();
+  };
+  app.onhostcontextchanged = (ctx) => {
+    applyContext(hostContext() || ctx);
+    updatePolling();
+    render();
+  };
+  document.addEventListener("visibilitychange", () => { updatePolling(); if (document.visibilityState === "visible") refresh(); });
+
+  await app.connect();
+  applyContext(hostContext());
+  render();
+</script>
+</body>
+</html>

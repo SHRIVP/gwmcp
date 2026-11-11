@@ -5,10 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "gwmcp"
 version = "0.1.0"
-description = "Guidewire PolicyCenter MCP server"
+description = "Everywire Policy System MCP server"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]>=1.6.0",
+    "mcp[cli]>=1.27.0,<2",
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
     "starlette>=0.37.0",
@@ -19,4 +19,11 @@ dependencies = [
 gwmcp = "server:main"
 
 [tool.hatch.build.targets.wheel]
-include = ["server.py", "client.py"]
+include = ["server.py", "client.py", "mock.py", "views.py", "state_store.py", "vercel_app.py", "ui/", "dev/"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+# Vercel would otherwise auto-detect server.py, whose `app` is the MCP server, not the web app.
+[tool.vercel]
+entrypoint = "vercel_app:app"

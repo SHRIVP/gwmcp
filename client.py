@@ -8,13 +8,17 @@ class AuthError(Exception):
     pass
 
 
-class GuidewireError(Exception):
+class EverywireError(Exception):
     def __init__(self, status: int, body: str):
         self.status = status
         super().__init__(f"HTTP {status}: {body[:500]}")
 
 
-class GuidewireClient:
+class EverywireClient:
+    # Policy editing (policy change jobs) isn't mapped to the Cloud API yet:
+    # coverage codes and terms depend on each tenant's product model.
+    supports_editing = False
+
     def __init__(
         self,
         base_url: str,
@@ -78,6 +82,6 @@ class GuidewireClient:
             self._token = None  # force re-auth on next call
             raise AuthError("Unauthorized — check credentials and token URL")
         if resp.status_code != 200:
-            raise GuidewireError(resp.status_code, resp.text)
+            raise EverywireError(resp.status_code, resp.text)
 
         return resp.json()

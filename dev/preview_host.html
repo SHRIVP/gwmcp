@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gwmcp preview host</title>
+<style>
+  :root { --bg: #f5f4ef; --panel: #fff; --text: #1f1f1e; --muted: #6b6a64; --border: #e2e0d8; --accent: #c96442; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1f1e1d; --panel: #262624; --text: #f0efea; --muted: #a8a69c; --border: #3a3936; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; }
+  #chat { flex: 1; min-width: 300px; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  #log { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 8px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); white-space: pre-wrap; font-size: 13px; }
+  .msg.call { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .msg.ctx { border-color: var(--accent); }
+  #controls { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button, select, input { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); }
+  button { cursor: pointer; }
+  input { flex: 1; min-width: 200px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  #pane { width: 46%; min-width: 340px; display: flex; flex-direction: column; background: var(--panel); transition: width .2s; }
+  body.fullscreen #pane { width: 62%; }
+  #pane-head { padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+  iframe { flex: 1; border: 0; width: 100%; background: transparent; }
+  .note { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="chat">
+  <div id="log">
+    <div class="msg">Preview host for the Policy System view, standing in for Claude. Each button sends a tool call the way Claude would. The view on the right is the same HTML Claude renders.<br><br><span class="note">Mock data only. Not the real Claude UI.</span></div>
+  </div>
+  <div id="controls">
+    <div class="row">
+      <button data-script="open">Open PA-200001-01</button>
+      <button data-script="start">Start change (Dec 1)</button>
+      <button data-script="civic">Add 2024 Honda Civic</button>
+      <button data-script="driver">Add driver Sam Smith</button>
+      <button data-script="collision">Collision → $1,000</button>
+      <button data-script="quote">Quote</button>
+    </div>
+    <div class="row">
+      <select id="tool"></select>
+      <input id="args" value='{"policyNumber":"PA-200001-01"}'>
+      <button id="send">Call tool</button>
+    </div>
+  </div>
+</div>
+<div id="pane">
+  <div id="pane-head"><span id="pane-title">No view open</span><span id="mode">inline</span></div>
+  <iframe id="frame" sandbox="allow-scripts allow-forms"></iframe>
+</div>
+
+<script type="module">
+  import { AppBridge, PostMessageTransport } from "https://esm.sh/@modelcontextprotocol/ext-apps@1.7.5/app-bridge?deps=zod@4.1.12,@modelcontextprotocol/sdk@1.29.0";
+
+  const log = document.getElementById("log");
+  const frame = document.getElementById("frame");
+  let rpcId = 1, tools = [], bridge = null, displayMode = "inline";
+
+  function say(text, cls = "") {
+    const div = Object.assign(document.createElement("div"), { className: "msg " + cls, textContent: text });
+    log.append(div); log.scrollTop = log.scrollHeight;
+  }
+
+  async function rpc(method, params = {}) {
+    const res = await fetch("/mcp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params }),
+    });
+    const body = await res.text();
+    const line = body.split("\n").find((l) => l.startsWith("data: "));
+    const msg = JSON.parse(line ? line.slice(6) : body);
+    if (msg.error) throw new Error(msg.error.message);
+    return msg.result;
+  }
+
+  function hostContext() {
+    const r = frame.getBoundingClientRect();
+    return {
+      theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+      displayMode, availableDisplayModes: ["inline", "fullscreen"],
+      containerDimensions: displayMode === "fullscreen" ? { width: r.width, height: r.height } : { width: r.width, maxHeight: 2000 },
+      platform: "web",
+    };
+  }
+
+  async function openView(uri, toolArgs, result) {
+    const res = await rpc("resources/read", { uri });
+    const html = res.contents[0].text;
+    if (bridge) { try { await bridge.close(); } catch {} }
+    bridge = new AppBridge(null, { name: "gwmcp-preview", version: "1.0.0" },
+      { serverTools: {}, openLinks: {}, updateModelContext: { text: {} } }, { hostContext: hostContext() });
+    bridge.oncalltool = async (params) => {
+      say(`view → ${params.name}(${JSON.stringify(params.arguments)})`, "call");
+      return rpc("tools/call", params);
+    };
+    bridge.onupdatemodelcontext = async (params) => {
+      say("View told Claude: " + (params.content || []).map((c) => c.text).join("\n"), "ctx");
+      return {};
+    };
+    bridge.onrequestdisplaymode = async ({ mode }) => {
+      displayMode = mode === "fullscreen" ? "fullscreen" : "inline";
+      document.body.classList.toggle("fullscreen", displayMode === "fullscreen");
+      document.getElementById("mode").textContent = displayMode;
+      setTimeout(() => bridge.sendHostContextChange(hostContext()), 250);
+      return { mode: displayMode };
+    };
+    bridge.onopenlink = async ({ url }) => { window.open(url, "_blank"); return {}; };
+    bridge.oninitialized = () => {
+      bridge.sendToolInput({ arguments: toolArgs });
+      bridge.sendToolResult(result);
+    };
+    const loaded = new Promise((r) => (frame.onload = r));
+    frame.srcdoc = html;
+    await loaded;
+    await bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow));
+    document.getElementById("pane-title").textContent = `View for ${toolArgs.policyNumber || ""}`;
+  }
+
+  async function callAsClaude(name, args) {
+    say(`Claude → ${name}(${JSON.stringify(args)})`, "call");
+    const result = await rpc("tools/call", { name, arguments: args });
+    say((result.isError ? "Error: " : "") + (result.content?.[0]?.text || ""));
+    const tool = tools.find((t) => t.name === name);
+    const uri = tool?._meta?.ui?.resourceUri;
+    if (uri) await openView(uri, args, result);
+  }
+
+  const P = "PA-200001-01";
+  const scripts = {
+    open: ["open_policy", { policyNumber: P }],
+    start: ["start_policy_change", { policyNumber: P, effectiveDate: "2026-12-01", description: "Add new car" }],
+    civic: ["add_vehicle", { policyNumber: P, year: 2024, make: "Honda", model: "Civic", vin: "2HGFE1F30RH000099" }],
+    driver: ["add_driver", { policyNumber: P, firstName: "Sam", lastName: "Smith", dateOfBirth: "2007-06-15", licenseNumber: "S530-0706-1507" }],
+    collision: ["update_coverage", { policyNumber: P, coverageCode: "PACollision", value: "$1,000 deductible" }],
+    quote: ["quote_policy_change", { policyNumber: P }],
+  };
+  document.querySelectorAll("[data-script]").forEach((b) => b.onclick = () => {
+    const [n, a] = scripts[b.dataset.script];
+    callAsClaude(n, a).catch((e) => say("Error: " + e.message));
+  });
+  document.getElementById("send").onclick = () => {
+    let args;
+    try { args = JSON.parse(document.getElementById("args").value || "{}"); }
+    catch { return say("Arguments must be JSON."); }
+    callAsClaude(document.getElementById("tool").value, args).catch((e) => say("Error: " + e.message));
+  };
+
+  tools = (await rpc("tools/list")).tools;
+  const sel = document.getElementById("tool");
+  // Like Claude, only offer tools the model may call (not app-only ones such as bind).
+  tools.filter((t) => !(t._meta?.ui?.visibility || ["model"]).every((v) => v === "app"))
+       .forEach((t) => sel.append(new Option(t.name, t.name)));
+</script>
+</body>
+</html>

@@ -1,6 +1,8 @@
-# Guidewire PolicyCenter MCP Server
+# Everywire Policy System MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that connects Claude to Guidewire PolicyCenter, enabling natural language search across policies, accounts, and jobs.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that connects Claude to Everywire Policy System. Claude can search policies, accounts, and jobs, and edit policies through policy changes. An interactive **Policy System view** (an [MCP App](https://claude.com/docs/connectors/building/mcp-apps/getting-started)) opens beside the chat and shows each change as Claude makes it.
+
+> **Status:** policy editing and the view currently run against the built-in **mock** data (`GW_MOCK=true`). Mapping policy changes onto a live tenant's Cloud API, and OAuth sign-in for the connector, are the next steps. Don't expose this server with real credentials until OAuth is in place.
 
 ## Tools
 
@@ -9,6 +11,23 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that c
 | `search_policies` | Search by policy number, account, status, date range, or product |
 | `search_accounts` | Search personal and commercial accounts by name, number, or email |
 | `search_jobs` | Search policy transactions — submissions, renewals, endorsements, cancellations |
+| `open_policy` | Open a policy in the Policy System view: vehicles, drivers, coverages, premium, open change |
+| `start_policy_change` | Start a policy change (endorsement) with an effective date |
+| `add_vehicle` / `remove_vehicle` | Edit vehicles on the open change (Personal Auto) |
+| `add_driver` | Add a driver to the open change (Personal Auto). Drivers under 25 carry a surcharge |
+| `update_coverage` | Change a limit or deductible to one of its allowed values |
+| `quote_policy_change` | Quote the change: new annual premium and prorated change in cost |
+| `withdraw_policy_change` | Discard the open change |
+| `bind_policy_change` | **View only.** Claude can't call it. The user binds with the view's Bind button |
+
+### How editing works
+
+1. Claude calls `start_policy_change`, then edit tools. Each edit lands in a **draft** policy change; the live policy is untouched.
+2. Every edit tool returns the updated policy, and the view renders it, with added vehicles and drivers and changed coverages highlighted.
+3. Claude calls `quote_policy_change`. Any later edit sends the change back to Draft, so it has to be re-quoted.
+4. **You** click **Bind change**, then confirm. The view calls `bind_policy_change` and tells Claude what you did.
+
+When the view is open in the side panel, it refreshes every few seconds (it shows a **Live** indicator).
 
 ## Setup
 
@@ -24,10 +43,10 @@ pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` with your Guidewire credentials:
+Edit `.env` with your Everywire credentials:
 
 ```env
-GW_BASE_URL=https://{tenant}.guidewire.net/pc/rest
+GW_BASE_URL=https://{tenant}.everywire.net/pc/rest
 GW_TOKEN_URL=https://{your-idp}/oauth2/token
 GW_CLIENT_ID=your-client-id
 GW_CLIENT_SECRET=your-client-secret
@@ -39,7 +58,23 @@ GW_CLIENT_SECRET=your-client-secret
 python server.py
 ```
 
-### 3. Test with MCP Inspector
+### 4. Run the HTTP server and preview the UI
+
+```bash
+GW_MOCK=true GW_TRANSPORT=http python server.py
+```
+
+- MCP endpoint: `http://localhost:8000/mcp` (Streamable HTTP), plus legacy SSE at `/sse`
+- UI preview: open `http://localhost:8000/preview`. It's a small stand-in for Claude that calls the tools and renders the Policy System view, mock mode only
+
+### 5. Run tests
+
+```bash
+pip install -e '.[dev]'
+pytest
+```
+
+### Test with MCP Inspector
 
 ```bash
 mcp dev server.py
@@ -47,7 +82,7 @@ mcp dev server.py
 
 ## Mock Mode
 
-No Guidewire credentials? Use built-in mock data:
+No Everywire credentials? Use built-in mock data:
 
 ```bash
 GW_MOCK=true mcp dev server.py
@@ -57,46 +92,54 @@ Sample data includes policies (`PA-200001-01`, `HO-200002-01`, `CP-200004-01`), 
 
 ## Connect to Claude
 
-### Claude.ai (Web Chat) — recommended for most users
+### Claude.ai / Claude Desktop as a custom connector (recommended)
 
-This requires the server to be deployed remotely (e.g. Railway) so Claude.ai can reach it.
+Claude connects from Anthropic's servers, so the server needs a public HTTPS URL: deploy it (e.g. Railway, below), or use a tunnel while testing.
 
-> **Mobile:** The Claude iOS/Android app does not support MCP yet. On mobile, open **claude.ai in your browser** (Safari/Chrome) instead of the app.
-
-1. Go to **claude.ai → Settings → Integrations**
-2. Click **Add Integration**
-3. Enter the server URL:
+1. Go to **Settings → Connectors → Add custom connector**
+2. Enter the server URL, ending in **`/mcp`**:
    ```
-   https://your-deployment.up.railway.app/sse
+   https://your-deployment.up.railway.app/mcp
    ```
-4. Click **Save**
+3. Enable the connector in a chat, then try:
+   - *"Open policy PA-200001-01 in Policy System"*
+   - *"Add a 2024 Honda Civic, VIN 2HGFE1F30RH000099, to that policy from Dec 1, and raise the collision deductible to $1,000"*
+   - *"Quote it"*, then click **Bind change** in the view
 
-The integration will appear in your Claude.ai chat. Enable it per-conversation using the tools icon in the chat bar, then ask things like:
-- *"Search for all inForce personal auto policies"*
-- *"Find accounts with last name Smith"*
-- *"Show me all renewal jobs for policy PA-200001-01"*
+The view shows in the conversation; click **Expand**, or let it open on its own, to keep it in the side panel. The side panel and the newer interactive features are rolling out to some organizations first and need the unified Chat and Cowork experience. Without them, the view still renders inline in the chat.
 
 ### Claude Desktop (Mac/Windows app)
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-```json
-{
-  "mcpServers": {
-    "gwmcp": {
-      "url": "https://your-deployment.up.railway.app/sse"
-    }
-  }
-}
-```
-
-Restart Claude Desktop after saving.
+Add it as a custom connector the same way as above. Connectors are shared between claude.ai and the desktop app, and the desktop app renders the view too.
 
 ### Claude Code (CLI)
 
+Claude Code uses the tools as text; it doesn't render the view.
+
 ```bash
-claude mcp add --transport sse gwmcp https://your-deployment.up.railway.app/sse
+claude mcp add --transport http gwmcp https://your-deployment.up.railway.app/mcp
 ```
+
+## Deploy to Vercel
+
+`vercel_app.py` exposes the server's web app to Vercel's Python runtime (set as `[tool.vercel] entrypoint` in `pyproject.toml`), and Vercel routes every path to it, so `/mcp`, `/health` and `/preview` keep their URLs. Legacy `/sse` needs a long-lived process and doesn't work on Vercel. Claude connectors use `/mcp`.
+
+Serverless requests can land on fresh processes, so in mock mode, edits are kept in **Upstash Redis** (from the Vercel Marketplace). Without Redis, mock edits live only in process memory.
+
+```bash
+npm i -g vercel
+vercel login
+vercel link                       # create/link the project
+# Vercel dashboard → project → Storage → Upstash for Redis → Connect
+#   (sets KV_REST_API_URL / KV_REST_API_TOKEN for the project)
+vercel env add GW_MOCK production         # true
+vercel env add GW_PUBLIC_URL production   # https://<your-domain>/mcp
+vercel --prod
+vercel domains add <your-domain>          # optional custom domain, e.g. gwmcp.example.com
+curl https://<your-domain>/health         # → "state": "redis"
+```
+
+To reset the demo data, delete the `gwmcp:mock:state` and `gwmcp:mock:state:rev` keys in the Upstash console.
 
 ## Deploy to Railway
 
@@ -107,9 +150,14 @@ brew install railway
 # Login and deploy
 railway login
 railway init
-railway variables set GW_TRANSPORT=sse GW_BASE_URL=... GW_TOKEN_URL=... GW_CLIENT_ID=... GW_CLIENT_SECRET=...
+# Mock data (safe for a demo; no auth yet):
+railway variables set GW_TRANSPORT=http GW_MOCK=true
+# Real tenant (search only for now — add OAuth before exposing):
+# railway variables set GW_TRANSPORT=http GW_BASE_URL=... GW_TOKEN_URL=... GW_CLIENT_ID=... GW_CLIENT_SECRET=...
 railway up
 railway domain
+# then, so the view gets a stable sandbox origin in Claude:
+railway variables set GW_PUBLIC_URL=https://<your-domain>/mcp
 ```
 
 The `railway.toml` is pre-configured. Railway sets the `PORT` automatically.
@@ -118,14 +166,15 @@ The `railway.toml` is pre-configured. Railway sets the `PORT` automatically.
 
 | Variable | Required | Description |
 |---|---|---|
-| `GW_BASE_URL` | Yes* | PolicyCenter REST base URL (e.g. `https://tenant.guidewire.net/pc/rest`) |
+| `GW_BASE_URL` | Yes* | Policy System REST base URL (e.g. `https://tenant.everywire.net/pc/rest`) |
 | `GW_TOKEN_URL` | Yes* | OAuth 2.0 token endpoint |
 | `GW_CLIENT_ID` | Yes* | OAuth client ID |
 | `GW_CLIENT_SECRET` | Yes* | OAuth client secret |
 | `GW_OAUTH_SCOPE` | No | Space-separated OAuth scopes (e.g. `pc:read`) |
-| `GW_TRANSPORT` | No | `stdio` (default) or `sse` for remote deployment |
-| `GW_MOCK` | No | Set to `true` to use mock data without real credentials |
-| `PORT` | No | Port for SSE transport (default `8000`, auto-set by Railway) |
+| `GW_TRANSPORT` | No | `stdio` (default) or `http` for remote deployment (`/mcp` + legacy `/sse`; `sse` is an alias) |
+| `GW_MOCK` | No | Set to `true` to use mock data without real credentials. Required for policy editing for now |
+| `GW_PUBLIC_URL` | No | Exact public URL added to Claude (e.g. `https://x.up.railway.app/mcp`); sets the view's `ui.domain` |
+| `PORT` | No | Port for the HTTP transport (default `8000`, auto-set by Railway) |
 
 *Not required when `GW_MOCK=true`
 
@@ -133,9 +182,15 @@ The `railway.toml` is pre-configured. Railway sets the `PORT` automatically.
 
 ```
 gwmcp/
-├── server.py       # MCP server — tool definitions and handlers
-├── client.py       # Guidewire HTTP client with OAuth2 token caching
-├── mock.py         # Mock client with sample insurance data
+├── server.py       # MCP server — tools, UI resource, stdio/HTTP transports
+├── client.py       # Everywire HTTP client with OAuth2 token caching
+├── mock.py         # Stateful mock: sample data + policy change workflow
+├── views.py        # Policy view model shared by the UI and Claude's text
+├── state_store.py  # Redis (Upstash) persistence for mock state on serverless
+├── vercel_app.py   # Vercel entry point ([tool.vercel] in pyproject.toml)
+├── ui/policy_view.html   # The Policy System view (MCP App)
+├── dev/preview_host.html # Local stand-in for Claude to preview the view
+├── tests/          # pytest: mock workflow + end-to-end over HTTP
 ├── pyproject.toml  # Package config and dependencies
 ├── railway.toml    # Railway deployment config
 └── .env.example    # Environment variable template
