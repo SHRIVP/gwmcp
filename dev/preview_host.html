@@ -43,6 +43,14 @@
       <button data-script="quote">Quote</button>
     </div>
     <div class="row">
+      <span class="note">New business:</span>
+      <button data-script="newacct">Create account Maria Lopez</button>
+      <button data-script="newho">Start home submission</button>
+      <button data-script="home">Set home details</button>
+      <button data-script="newquote">Quote submission</button>
+      <span class="note">Home details call the public Census and FEMA services.</span>
+    </div>
+    <div class="row">
       <select id="tool"></select>
       <input id="args" value='{"policyNumber":"PA-200001-01"}'>
       <button id="send">Call tool</button>
@@ -129,6 +137,7 @@
     const tool = tools.find((t) => t.name === name);
     const uri = tool?._meta?.ui?.resourceUri;
     if (uri) await openView(uri, args, result);
+    return result;
   }
 
   const P = "PA-200001-01";
@@ -139,10 +148,25 @@
     driver: ["add_driver", { policyNumber: P, firstName: "Sam", lastName: "Smith", dateOfBirth: "2007-06-15", licenseNumber: "S530-0706-1507" }],
     collision: ["update_coverage", { policyNumber: P, coverageCode: "PACollision", value: "$1,000 deductible" }],
     quote: ["quote_policy_change", { policyNumber: P }],
+    // New business: later steps use the account / policy numbers earlier steps returned.
+    newacct: () => ["create_account", { firstName: "Maria", lastName: "Lopez", email: "maria@example.com",
+      addressLine1: "12 Oak St", city: "Springfield", state: "IL", postalCode: "62704" }],
+    newho: () => ["start_submission", { accountNumber: nb.account || "ACC-10001", productCode: "HomeOwners",
+      effectiveDate: new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10), description: "New home" }],
+    home: () => ["set_home_details", { policyNumber: nb.policy, address: "12 Oak St, Springfield, IL 62704",
+      yearBuilt: 1998, constructionType: "masonry", squareFeet: 2100, roofYear: 2019, stories: 2 }],
+    newquote: () => ["quote_policy_change", { policyNumber: nb.policy }],
   };
-  document.querySelectorAll("[data-script]").forEach((b) => b.onclick = () => {
-    const [n, a] = scripts[b.dataset.script];
-    callAsClaude(n, a).catch((e) => say("Error: " + e.message));
+  const nb = { account: null, policy: null };
+  document.querySelectorAll("[data-script]").forEach((b) => b.onclick = async () => {
+    const entry = scripts[b.dataset.script];
+    const [n, a] = typeof entry === "function" ? entry() : entry;
+    if ("policyNumber" in a && !a.policyNumber) return say("Start a home submission first.");
+    try {
+      const text = (await callAsClaude(n, a))?.content?.[0]?.text || "";
+      nb.account = text.match(/ACC-\d+/)?.[0] && n === "create_account" ? text.match(/ACC-\d+/)[0] : nb.account;
+      if (n === "start_submission") nb.policy = text.match(/HO-\d+-01/)?.[0] || nb.policy;
+    } catch (e) { say("Error: " + e.message); }
   });
   document.getElementById("send").onclick = () => {
     let args;

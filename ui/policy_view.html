@@ -100,6 +100,7 @@
   .change-title { font-weight: 600; }
   .change ul { margin: 8px 0 0; padding: 0; list-style: none; }
   .change li { padding: 2px 0; }
+  .change ul.factors { margin-top: 6px; font-size: 12.5px; border-top: 1px dashed var(--warn-border); padding-top: 6px; }
   .add { color: var(--ok); }
   .rem { color: var(--danger); }
   .premium { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 10px; font-size: 13px; }
@@ -155,9 +156,33 @@
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const signed = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US",
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const statusLabel = { inForce: "In force", scheduled: "Scheduled", canceled: "Canceled", expired: "Expired" };
+  const statusLabel = { inForce: "In force", scheduled: "Scheduled", canceled: "Canceled", expired: "Expired",
+    submission: "Submission", withdrawn: "Withdrawn" };
   const vehicleLabel = (v) => `${v.year} ${esc(v.make)} ${esc(v.model)}`;
   const driverLabel = (x) => `${esc(x.firstName)} ${esc(x.lastName)}`;
+  const isSubmission = () => view?.draft?.kind === "submission";
+
+  function homeSection(home) {
+    if (!home) return `<section><h2>Home</h2><table><tr><td class="muted">No home details yet. Ask Claude to add the home's address and details.</td></tr></table></section>`;
+    const geo = home.lookup?.geocode || {}, flood = home.lookup?.flood || {};
+    let addr;
+    if (geo.status === "ok") addr = `${esc(geo.matchedAddress)}<div class="muted">${esc(geo.county || "")}${geo.county ? ", " : ""}${esc(geo.state || "")} · ${esc(geo.source)}</div>`;
+    else if (geo.status === "no_match") addr = `${esc(home.address)}<span class="tag">address not verified</span><div class="muted">No match in ${esc(geo.source)}</div>`;
+    else addr = `${esc(home.address)}<span class="tag">check unavailable</span><div class="muted">Address lookup didn't respond; it will be retried</div>`;
+    const floodText = flood.status === "ok" ? `Zone ${esc(flood.zone)}`
+      : flood.status === "not_mapped" ? "Outside mapped flood areas"
+      : flood.status === "failed" ? "Unavailable (will retry)" : "Unknown";
+    const row = (label, value) => `<tr><td>${label}</td><td>${value ?? `<span class="muted">Not given</span>`}</td></tr>`;
+    return `<section><h2>Home</h2><table>
+      <tr><td colspan="2">${addr}</td></tr>
+      ${row("Flood zone", `${floodText}${flood.source && flood.status !== "skipped" ? `<div class="muted">${esc(flood.source)}</div>` : ""}`)}
+      ${row("Year built", home.yearBuilt)}
+      ${row("Construction", home.constructionType ? esc(home.constructionType.replace("_", " ")) : null)}
+      ${row("Square footage", home.squareFeet ? home.squareFeet.toLocaleString("en-US") : null)}
+      ${row("Roof year", home.roofYear)}
+      ${row("Stories", home.stories)}
+    </table></section>`;
+  }
   const textOf = (result) => (result?.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
 
   function hostContext() { return app.getHostContext?.() || {}; }
@@ -204,28 +229,38 @@
         ...d.coverages.filter((x) => x.change).map((x) => `<li>${esc(x.name)}: <s>${esc(x.previousValue)}</s> → <b>${esc(x.value)}</b></li>`),
       ];
       const q = d.quote;
+      const sub = d.kind === "submission";
+      const factors = q?.factors?.length
+        ? `<ul class="factors">${q.factors.map((f) => `<li>${esc(f.name)} · <span class="muted">${esc(f.detail)}</span> · <b>×${f.multiplier}</b></li>`).join("")}</ul>`
+        : "";
+      const emptyHint = sub
+        ? (v.product.code === "HomeOwners" ? "Ask Claude to add the home's details." : "Ask Claude to add vehicles and drivers.")
+        : "No changes yet. Ask Claude to make one.";
       html += `
         <div class="change">
           <div class="change-top">
-            <span class="change-title">Policy change ${esc(d.jobNumber)}</span>
+            <span class="change-title">${sub ? "New submission" : "Policy change"} ${esc(d.jobNumber)}</span>
             <span class="badge ${esc(d.status)}">${esc(d.status)}</span>
           </div>
           <div class="sub">Effective ${esc(d.effectiveDate)}${d.description ? " · " + esc(d.description) : ""}</div>
-          <ul>${changes.join("") || `<li class="muted">No changes yet. Ask Claude to make one.</li>`}</ul>
+          <ul>${changes.join("") || `<li class="muted">${emptyHint}</li>`}</ul>
           <div class="premium">
             ${q
-              ? `<span>Annual premium <s>${money(v.premium)}</s> → <b>${money(q.annualPremium)}</b></span>
-                 <span>Change for remaining term <b>${signed(q.changeInCost)}</b></span>`
-              : `<span class="muted">Annual premium ${money(v.premium)} · not quoted yet</span>`}
+              ? (sub
+                ? `<span>Annual premium <b>${money(q.annualPremium)}</b></span>`
+                : `<span>Annual premium <s>${money(v.premium)}</s> → <b>${money(q.annualPremium)}</b></span>
+                   <span>Change for remaining term <b>${signed(q.changeInCost)}</b></span>`)
+              : `<span class="muted">${sub ? "Not quoted yet" : `Annual premium ${money(v.premium)} · not quoted yet`}</span>`}
           </div>
+          ${factors}
           <div class="actions">
             ${q
               ? `<button class="btn ${confirmingBind ? "confirm" : "primary"}" data-act="bind" ${busy ? "disabled" : ""}>
-                   ${confirmingBind ? `Confirm: bind ${signed(q.changeInCost)}` : "Bind change"}</button>
+                   ${confirmingBind ? `Confirm: bind ${sub ? money(q.annualPremium) : signed(q.changeInCost)}` : (sub ? "Bind new policy" : "Bind change")}</button>
                  ${confirmingBind ? `<button class="btn" data-act="cancel-bind" ${busy ? "disabled" : ""}>Cancel</button>` : ""}`
-              : `<button class="btn primary" disabled title="Ask Claude to quote the change first">Bind change</button>`}
+              : `<button class="btn primary" disabled title="Ask Claude to quote it first">${sub ? "Bind new policy" : "Bind change"}</button>`}
             <button class="btn" data-act="withdraw" ${busy ? "disabled" : ""}>Withdraw</button>
-            <span class="hint">${q ? "Nothing changes on the live policy until you bind." : "Ask Claude to quote it when the edits are done."}</span>
+            <span class="hint">${q ? (sub ? "The policy is issued when you bind." : "Nothing changes on the live policy until you bind.") : "Ask Claude to quote it when the edits are done."}</span>
           </div>
         </div>`;
     } else if (v.canEdit) {
@@ -245,12 +280,14 @@
           <td class="muted mono">${esc(x.id)}</td>
         </tr>`).join("") || `<tr><td class="muted">No drivers listed</td></tr>`}</table></section>`;
     }
+    if (v.product.code === "HomeOwners" && (d || v.home)) html += homeSection(d ? d.home : v.home);
     html += `<section><h2>Coverages</h2><table>${coverages.map((x) => `
         <tr>
           <td>${esc(x.name)}</td>
           <td>${x.change ? `<s>${esc(x.previousValue)}</s> → <b>${esc(x.value)}</b>` : esc(x.value)}</td>
         </tr>`).join("")}</table></section>`;
-    html += `<section><h2>Premium</h2><table><tr><td>Annual premium</td><td><b>${money(v.premium)}</b></td></tr></table></section>`;
+    if (v.status !== "submission" && v.status !== "withdrawn")
+      html += `<section><h2>Premium</h2><table><tr><td>Annual premium</td><td><b>${money(v.premium)}</b></td></tr></table></section>`;
     if (v.jobs?.length) {
       html += `<section><h2>Recent jobs</h2><table>${v.jobs.slice(0, 5).map((j) => `
         <tr><td>${esc(j.jobNumber)} <span class="muted">· ${esc(j.jobType)}</span></td>
@@ -328,9 +365,11 @@
     if (a === "cancel-bind") { confirmingBind = false; return render(); }
     if (a === "bind") {
       if (!confirmingBind) { confirmingBind = true; return render(); }
-      return act("bind_policy_change", `Bound. ${policyNumber} now reflects the change.`);
+      return act("bind_policy_change", isSubmission()
+        ? `Bound. ${policyNumber} is now a policy.` : `Bound. ${policyNumber} now reflects the change.`);
     }
-    if (a === "withdraw") return act("withdraw_policy_change", "Policy change withdrawn. The policy is unchanged.");
+    if (a === "withdraw") return act("withdraw_policy_change", isSubmission()
+      ? "Submission withdrawn." : "Policy change withdrawn. The policy is unchanged.");
   });
 
   // ------------------------------------------------------------ host wiring

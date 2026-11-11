@@ -133,14 +133,20 @@ def _home_lines(home: dict) -> list[str]:
 
 def policy_view_text(view: dict, headline: str | None = None) -> str:
     lines = []
+    submission = (view.get("draft") or {}).get("kind") == "submission"
     if headline:
+        if submission:
+            headline = headline.replace("the policy change", "the new submission")
         lines += [headline, ""]
     lines.append(
         f"Policy {view['policyNumber']} · {view['product']['name']} · {view['status']} · "
         f"{view['effectiveDate']} → {view['expirationDate']}"
     )
     lines.append(f"Account {view['account']['accountNumber']} · {view['account']['name']}")
-    lines.append(f"Annual premium: {_money(view['premium'])}")
+    if view["status"] in ("submission", "withdrawn"):
+        lines.append("Annual premium: not issued yet")
+    else:
+        lines.append(f"Annual premium: {_money(view['premium'])}")
 
     if view["vehicles"]:
         lines.append("Vehicles:")
@@ -170,7 +176,7 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
         changes += [
             f"  ~ {c['code']}: {c['previousValue']} → {c['value']}" for c in d["coverages"] if c["change"]
         ]
-        lines += changes or ["  (no changes yet)"]
+        lines += changes or ([] if d["kind"] == "submission" else ["  (no changes yet)"])
         if d["quote"]:
             q = d["quote"]
             for f in q.get("factors") or []:

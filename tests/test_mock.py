@@ -527,3 +527,12 @@ def test_seed_homeowners_unchanged(hgw, fake):
     assert q["factors"] == [] and q["annualPremium"] == 1525.0
     assert 0 < q["changeInCost"] < 75
     assert fake.calls == []
+
+
+def test_submission_text_wording(hgw):
+    num = ho_submission(hgw)
+    full_details(hgw, num)
+    text = policy_view_text(run(hgw.quote_policy_change(num)), "Quoted the policy change.")
+    assert "Annual premium: $0.00" not in text and "Annual premium: not issued yet" in text
+    assert "(no changes yet)" not in text
+    assert text.startswith("Quoted the new submission.")
