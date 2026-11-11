@@ -103,7 +103,7 @@ def _driver_label(d: dict) -> str:
     return f"{d['firstName']} {d['lastName']} (born {d['dateOfBirth']}{lic}) [id {d['id']}]"
 
 
-def _home_lines(home: dict) -> list[str]:
+def _home_lines(home: dict, open_draft: bool) -> list[str]:
     lookup = home.get("lookup") or {}
     geo, flood = lookup.get("geocode") or {}, lookup.get("flood") or {}
     lines = ["Home:"]
@@ -119,7 +119,8 @@ def _home_lines(home: dict) -> list[str]:
     elif flood.get("status") == "not_mapped":
         lines.append(f"  • Flood zone: outside mapped flood areas (source {flood['source']})")
     elif flood.get("status") == "failed":
-        lines.append("  • Flood zone: unavailable (FEMA lookup failed; it will be retried)")
+        lines.append("  • Flood zone: unavailable (FEMA lookup failed" +
+                     ("; it will be retried)" if open_draft else ")"))
     details = [
         f"built {home['yearBuilt']}" if home.get("yearBuilt") else "year built not given",
         (home.get("constructionType") or "construction not given").replace("_", " "),
@@ -156,7 +157,7 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
         lines += [f"  • {_driver_label(d)}" for d in view["drivers"]]
     home = (view.get("draft") or {}).get("home") or view.get("home")
     if home:
-        lines += _home_lines(home)
+        lines += _home_lines(home, bool(view.get("draft")))
     elif view["product"]["code"] == "HomeOwners" and view.get("draft", {}) and view["draft"]["kind"] == "submission":
         lines.append("Home: no details yet — call set_home_details with the property address.")
     lines.append("Coverages (code: value — allowed values):")

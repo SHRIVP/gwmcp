@@ -150,10 +150,10 @@
     quote: ["quote_policy_change", { policyNumber: P }],
     // New business: later steps use the account / policy numbers earlier steps returned.
     newacct: () => ["create_account", { firstName: "Maria", lastName: "Lopez", email: "maria@example.com",
-      addressLine1: "12 Oak St", city: "Springfield", state: "IL", postalCode: "62704" }],
+      addressLine1: "600 Poydras St", city: "New Orleans", state: "LA", postalCode: "70130" }],
     newho: () => ["start_submission", { accountNumber: nb.account || "ACC-10001", productCode: "HomeOwners",
       effectiveDate: new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10), description: "New home" }],
-    home: () => ["set_home_details", { policyNumber: nb.policy, address: "12 Oak St, Springfield, IL 62704",
+    home: () => ["set_home_details", { policyNumber: nb.policy, address: "600 Poydras St, New Orleans, LA 70130",
       yearBuilt: 1998, constructionType: "masonry", squareFeet: 2100, roofYear: 2019, stories: 2 }],
     newquote: () => ["quote_policy_change", { policyNumber: nb.policy }],
   };

@@ -536,3 +536,12 @@ def test_submission_text_wording(hgw):
     assert "Annual premium: $0.00" not in text and "Annual premium: not issued yet" in text
     assert "(no changes yet)" not in text
     assert text.startswith("Quoted the new submission.")
+
+
+def test_bound_policy_text_no_retry_promise():
+    gw = MockEverywireClient(property_lookup=FakeLookup(lookup_result(flood="failed")))
+    num = ho_submission(gw, eff=0)
+    full_details(gw, num)
+    run(gw.quote_policy_change(num))
+    text = policy_view_text(run(gw.bind_policy_change(num)), "Bound.")
+    assert "Flood zone: unavailable" in text and "retried" not in text

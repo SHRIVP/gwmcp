@@ -171,7 +171,7 @@
     else addr = `${esc(home.address)}<span class="tag">check unavailable</span><div class="muted">Address lookup didn't respond; it will be retried</div>`;
     const floodText = flood.status === "ok" ? `Zone ${esc(flood.zone)}`
       : flood.status === "not_mapped" ? "Outside mapped flood areas"
-      : flood.status === "failed" ? "Unavailable (will retry)" : "Unknown";
+      : flood.status === "failed" ? (view?.draft ? "Unavailable (will retry)" : "Unavailable") : "Unknown";
     const row = (label, value) => `<tr><td>${label}</td><td>${value ?? `<span class="muted">Not given</span>`}</td></tr>`;
     return `<section><h2>Home</h2><table>
       <tr><td colspan="2">${addr}</td></tr>
@@ -233,9 +233,10 @@
       const factors = q?.factors?.length
         ? `<ul class="factors">${q.factors.map((f) => `<li>${esc(f.name)} · <span class="muted">${esc(f.detail)}</span> · <b>×${f.multiplier}</b></li>`).join("")}</ul>`
         : "";
-      const emptyHint = sub
-        ? (v.product.code === "HomeOwners" ? "Ask Claude to add the home's details." : "Ask Claude to add vehicles and drivers.")
-        : "No changes yet. Ask Claude to make one.";
+      const emptyHint = !sub ? "No changes yet. Ask Claude to make one."
+        : v.product.code !== "HomeOwners" ? "Ask Claude to add vehicles and drivers."
+        : !d.home ? "Ask Claude to add the home's address and details."
+        : q ? "" : "Ask Claude to quote it when the home's details are complete.";
       html += `
         <div class="change">
           <div class="change-top">
@@ -243,7 +244,7 @@
             <span class="badge ${esc(d.status)}">${esc(d.status)}</span>
           </div>
           <div class="sub">Effective ${esc(d.effectiveDate)}${d.description ? " · " + esc(d.description) : ""}</div>
-          <ul>${changes.join("") || `<li class="muted">${emptyHint}</li>`}</ul>
+          ${changes.length ? `<ul>${changes.join("")}</ul>` : emptyHint ? `<ul><li class="muted">${emptyHint}</li></ul>` : ""}
           <div class="premium">
             ${q
               ? (sub

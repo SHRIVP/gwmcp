@@ -295,8 +295,8 @@ EDIT_DISPATCH = {
                                               "squareFeet", "roofYear", "stories"], "Updated the home details."),
     "update_coverage": ("update_coverage", ["policyNumber", "coverageCode", "value"], "Updated the coverage."),
     "quote_policy_change": ("quote_policy_change", ["policyNumber"], "Quoted the policy change."),
-    "withdraw_policy_change": ("withdraw_policy_change", ["policyNumber"], "Withdrew the policy change."),
-    "bind_policy_change": ("bind_policy_change", ["policyNumber"], "Bound the policy change."),
+    "withdraw_policy_change": ("withdraw_policy_change", ["policyNumber"], "Withdrawn."),
+    "bind_policy_change": ("bind_policy_change", ["policyNumber"], "Bound."),
 }
 
 
