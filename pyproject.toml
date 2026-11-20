@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gwmcp"
 version = "0.1.0"
-description = "Everywire Policy System MCP server"
+description = "Everywire PAS MCP server"
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.27.0,<2",

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a business user create an account, build a Personal Auto or Homeowners submission, quote it (homeowners priced from home details plus Census/FEMA public data) and bind it from the Policy System view.
+**Goal:** Let a business user create an account, build a Personal Auto or Homeowners submission, quote it (homeowners priced from home details plus Census/FEMA public data) and bind it from the PAS view.
 
 **Architecture:** A submission is an open draft in the mock's existing `_drafts` map, keyed by a policy number assigned at start, so every existing edit, quote and withdraw tool works on it unchanged. A new `property_data.py` does the two public lookups behind an injectable async callable. `PersistentMockClient` runs lookups *before* its load/apply/save loop and passes the result in. Rating gains a homeowners factor breakdown that applies only to records with home details.
 
@@ -19,7 +19,7 @@
 - Tests never touch the network. Every test that reaches a lookup injects a fake or an `httpx.MockTransport`.
 - Existing seed policies, their premiums and all existing tests stay unchanged.
 - Every new piece of mock state is in `_STATE_FIELDS`. State saved before this change loads through `from_state` with defaults.
-- Copy: user-facing text says "Policy System" and "Everywire", never the old product or vendor names.
+- Copy: user-facing text says "PAS" and "Everywire", never the old product or vendor names.
 
 ## Review Focus
 
@@ -40,7 +40,7 @@ The branch has uncommitted work (policy-editing UI, the rename, `add_driver`). C
 
 ```bash
 git add -A && git status --short
-git commit -m "Policy editing UI, Everywire/Policy System rename, add_driver"
+git commit -m "Policy editing UI, Everywire/PAS rename, add_driver"
 ```
 
 ---
@@ -283,7 +283,7 @@ git commit -m "Policy editing UI, Everywire/Policy System rename, add_driver"
   - Check the view's script parses: extract the module script with Python and run `node --check` on it, as was done for `add_driver`. Expected: no output, exit 0.
   - Run `uv run pytest -q`. Expected: all pass.
   - Start `GW_MOCK=true GW_TRANSPORT=http uv run python server.py`, open `http://localhost:8000/preview`, and run the four new-business buttons in order. Expected: the view shows the submission, the Home section with sources, then a quote with 7 factors. This step makes real Census/FEMA calls. If they're unreachable from the machine, expect "unavailable" details and a quote that still works.
-- [ ] **Step 5: Commit** with `git commit -am "Show submissions and home details in the Policy System view; document new business"`.
+- [ ] **Step 5: Commit** with `git commit -am "Show submissions and home details in the PAS view; document new business"`.
 
 ---
 

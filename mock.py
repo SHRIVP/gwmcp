@@ -1,4 +1,4 @@
-"""In-memory Policy System stand-in.
+"""In-memory PAS stand-in.
 
 Search data keeps the JSON:API-ish shape the search tools already format.
 Policy details (vehicles, coverages, premium) and the policy-change workflow

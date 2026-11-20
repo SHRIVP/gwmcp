@@ -83,7 +83,7 @@ POLICY_NUMBER = {"type": "string", "description": "Policy number, e.g. PA-200001
 SEARCH_TOOLS = [
     _tool(
         "search_policies", "Search policies",
-        "Search Everywire Policy System policies. "
+        "Search Everywire PAS policies. "
         "At least one filter is recommended; omitting all returns the first page of all policies.",
         {
             "policyNumber": {"type": "string", "description": "Exact policy number (e.g. 01-123456-01)"},
@@ -102,7 +102,7 @@ SEARCH_TOOLS = [
     ),
     _tool(
         "search_accounts", "Search accounts",
-        "Search Everywire Policy System accounts by number, name, or email. "
+        "Search Everywire PAS accounts by number, name, or email. "
         "Supports both personal (firstName/lastName) and commercial (companyName) accounts.",
         {
             "accountNumber": {"type": "string", "description": "Exact account number"},
@@ -116,7 +116,7 @@ SEARCH_TOOLS = [
     ),
     _tool(
         "search_jobs", "Search jobs",
-        "Search Everywire Policy System policy transactions: submissions, renewals, "
+        "Search Everywire PAS policy transactions: submissions, renewals, "
         "endorsements, cancellations, and reinstatements.",
         {
             "jobNumber": {"type": "string", "description": "Exact job/transaction number"},
@@ -157,7 +157,7 @@ ACCOUNT_TOOLS = [
 EDIT_TOOLS = [
     _tool(
         "open_policy", "Open policy",
-        "Open a policy in the interactive Policy System view, showing its vehicles, drivers, coverages, premium and any "
+        "Open a policy in the interactive PAS view, showing its vehicles, drivers, coverages, premium and any "
         "open policy change. Call this before editing, and to show the user a policy.",
         {"policyNumber": POLICY_NUMBER}, ["policyNumber"], ui=True, read_only=True,
     ),
@@ -166,7 +166,7 @@ EDIT_TOOLS = [
         "Start a new-business submission (a new policy) for an account: Personal Auto or Homeowners. "
         "For a new customer, call create_account first. Then build it with add_vehicle / add_driver (auto) "
         "or set_home_details (homeowners) and update_coverage, and quote it with quote_policy_change. "
-        "The user binds it from the Policy System view.",
+        "The user binds it from the PAS view.",
         {
             "accountNumber": {"type": "string", "description": "Account number, e.g. ACC-10006"},
             "productCode": {"type": "string", "enum": ["PersonalAuto", "HomeOwners"],
@@ -261,7 +261,7 @@ EDIT_TOOLS = [
     _tool(
         "quote_policy_change", "Quote policy change",
         "Quote the open policy change or new submission to get the annual premium (and, for a change, "
-        "the change in cost). After quoting, the user reviews it and binds it from the Policy System view.",
+        "the change in cost). After quoting, the user reviews it and binds it from the PAS view.",
         {"policyNumber": POLICY_NUMBER}, ["policyNumber"], ui=True,
     ),
     _tool(
@@ -407,7 +407,7 @@ async def list_resources() -> list[types.Resource]:
     return [
         types.Resource(
             uri=VIEW_URI,
-            name="Policy System policy view",
+            name="PAS policy view",
             description="Interactive view of a policy and its open policy change",
             mimeType=VIEW_MIME,
         )
@@ -430,7 +430,7 @@ async def _call_edit_tool(name: str, arguments: dict) -> types.CallToolResult:
     if not getattr(client, "supports_editing", False):
         return _error(
             "Policy editing is only wired up in mock mode (GW_MOCK=true) so far. "
-            "Connecting it to a live Policy System tenant's Cloud API is the next step."
+            "Connecting it to a live PAS tenant's Cloud API is the next step."
         )
     method, arg_names, headline = EDIT_DISPATCH[name]
     args = [arguments.get(a) for a in arg_names]

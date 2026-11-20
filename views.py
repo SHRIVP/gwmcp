@@ -184,13 +184,13 @@ def policy_view_text(view: dict, headline: str | None = None) -> str:
                 lines.append(f"  {f['name']}: {f['detail']} ×{f['multiplier']}")
             if d["kind"] == "submission":
                 lines.append(f"  Quoted: annual premium {_money(q['annualPremium'])}")
-                lines.append("  The user binds the new policy with the Bind button in the Policy System view.")
+                lines.append("  The user binds the new policy with the Bind button in the PAS view.")
             else:
                 lines.append(
                     f"  Quoted: new annual premium {_money(q['annualPremium'])}, "
                     f"change in cost for remaining term {_money(q['changeInCost'])}"
                 )
-                lines.append("  The user binds the change with the Bind button in the Policy System view.")
+                lines.append("  The user binds the change with the Bind button in the PAS view.")
         else:
             lines.append("  Not quoted yet — call quote_policy_change when the edits are done.")
     elif view["canEdit"]:

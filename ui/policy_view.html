@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Policy System</title>
+<title>PAS</title>
 <style>
   :root {
     --bg: var(--color-background-primary, #ffffff);
@@ -127,7 +127,7 @@
 </style>
 </head>
 <body>
-<div id="root"><div class="empty">Loading Policy System…</div></div>
+<div id="root"><div class="empty">Loading PAS…</div></div>
 
 <script type="module">
   import {
@@ -139,7 +139,7 @@
   // "fullscreen" only (no "inline"): Claude shows a card in the conversation and opens
   // this view in the right-hand side panel by itself. Where the side panel isn't
   // available yet, Claude falls back to showing the view in the conversation.
-  const app = new App({ name: "Policy System view", version: "1.0.0" },
+  const app = new App({ name: "PAS view", version: "1.0.0" },
                       { availableDisplayModes: ["fullscreen"] });
 
   let view = null;            // last policy view from the server
@@ -193,7 +193,7 @@
     if (!view) {
       root.innerHTML = banner
         ? `<div class="banner ${banner.kind}">${esc(banner.text)}</div>`
-        : `<div class="empty">${policyNumber ? `Opening ${esc(policyNumber)}…` : "Loading Policy System…"}</div>`;
+        : `<div class="empty">${policyNumber ? `Opening ${esc(policyNumber)}…` : "Loading PAS…"}</div>`;
       return;
     }
     const v = view, d = v.draft;
@@ -207,7 +207,7 @@
     let html = `
       <header>
         <div>
-          <div class="eyebrow">Policy System · ${esc(v.product.name)}</div>
+          <div class="eyebrow">PAS · ${esc(v.product.name)}</div>
           <h1>${esc(v.policyNumber)} <span class="badge ${esc(v.status)}">${esc(statusLabel[v.status] || v.status)}</span></h1>
           <div class="sub">${esc(v.account.name)} · ${esc(v.account.accountNumber)} · ${esc(v.effectiveDate)} → ${esc(v.expirationDate)}</div>
         </div>
@@ -311,7 +311,7 @@
       return true;
     }
     if (result?.isError) {
-      banner = { kind: "error", text: textOf(result) || "Policy System returned an error." };
+      banner = { kind: "error", text: textOf(result) || "PAS returned an error." };
       render();
     }
     return false;
@@ -344,7 +344,7 @@
         // Tell Claude what the user did, so its next reply knows.
         try {
           await app.updateModelContext({ content: [{ type: "text", text:
-            `The user clicked "${name === "bind_policy_change" ? "Bind" : "Withdraw"}" in the Policy System view. ${textOf(result)}` }] });
+            `The user clicked "${name === "bind_policy_change" ? "Bind" : "Withdraw"}" in the PAS view. ${textOf(result)}` }] });
         } catch { /* host may not support model context updates */ }
       }
     } catch (e) {

@@ -33,10 +33,10 @@ read-only (`supports_editing = False`).
      coordinates (public ArcGIS REST service, no key needed).
 5. Quote the submission. Homeowners pricing uses the home details and the public
    data, and the quote shows **which factors raised or lowered the price**.
-6. The user binds by clicking **Bind** in the Policy System view. Claude still can't
+6. The user binds by clicking **Bind** in the PAS view. Claude still can't
    bind (same `app_only` rule as `bind_policy_change`). Binding creates an in-force
    (or scheduled) policy and a Bound `Submission` job.
-7. The Policy System view shows a submission as it's built, the same way it shows a
+7. The PAS view shows a submission as it's built, the same way it shows a
    policy change today.
 
 ## Non-goals

@@ -1,6 +1,6 @@
-# Everywire Policy System MCP Server
+# Everywire PAS MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that connects Claude to Everywire Policy System. Claude can search policies, accounts, and jobs, edit policies through policy changes, and write new business: create an account, then quote and bind a new Personal Auto or Homeowners policy. An interactive **Policy System view** (an [MCP App](https://claude.com/docs/connectors/building/mcp-apps/getting-started)) opens beside the chat and shows each change as Claude makes it.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that connects Claude to Everywire PAS. Claude can search policies, accounts, and jobs, edit policies through policy changes, and write new business: create an account, then quote and bind a new Personal Auto or Homeowners policy. An interactive **PAS view** (an [MCP App](https://claude.com/docs/connectors/building/mcp-apps/getting-started)) opens beside the chat and shows each change as Claude makes it.
 
 > **Status:** policy editing and the view currently run against the built-in **mock** data (`GW_MOCK=true`). Mapping policy changes onto a live tenant's Cloud API, and OAuth sign-in for the connector, are the next steps. Don't expose this server with real credentials until OAuth is in place.
 
@@ -11,7 +11,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that c
 | `search_policies` | Search by policy number, account, status, date range, or product |
 | `search_accounts` | Search personal and commercial accounts by name, number, or email |
 | `search_jobs` | Search policy transactions — submissions, renewals, endorsements, cancellations |
-| `open_policy` | Open a policy in the Policy System view: vehicles, drivers, coverages, premium, open change |
+| `open_policy` | Open a policy in the PAS view: vehicles, drivers, coverages, premium, open change |
 | `start_policy_change` | Start a policy change (endorsement) with an effective date |
 | `add_vehicle` / `remove_vehicle` | Edit vehicles on the open change (Personal Auto) |
 | `add_driver` | Add a driver to the open change (Personal Auto). Drivers under 25 carry a surcharge |
@@ -82,7 +82,7 @@ GW_MOCK=true GW_TRANSPORT=http python server.py
 ```
 
 - MCP endpoint: `http://localhost:8000/mcp` (Streamable HTTP), plus legacy SSE at `/sse`
-- UI preview: open `http://localhost:8000/preview`. It's a small stand-in for Claude that calls the tools and renders the Policy System view, mock mode only
+- UI preview: open `http://localhost:8000/preview`. It's a small stand-in for Claude that calls the tools and renders the PAS view, mock mode only
 
 ### 5. Run tests
 
@@ -119,7 +119,7 @@ Claude connects from Anthropic's servers, so the server needs a public HTTPS URL
    https://your-deployment.up.railway.app/mcp
    ```
 3. Enable the connector in a chat, then try:
-   - *"Open policy PA-200001-01 in Policy System"*
+   - *"Open policy PA-200001-01 in PAS"*
    - *"Add a 2024 Honda Civic, VIN 2HGFE1F30RH000099, to that policy from Dec 1, and raise the collision deductible to $1,000"*
    - *"Quote it"*, then click **Bind change** in the view
    - *"New customer Maria Lopez, maria@example.com, 12 Oak St, Springfield IL 62704. Quote home insurance from Dec 1: built 1998, brick, 2,100 sq ft, roof replaced 2019"*, then click **Bind new policy**
@@ -184,7 +184,7 @@ The `railway.toml` is pre-configured. Railway sets the `PORT` automatically.
 
 | Variable | Required | Description |
 |---|---|---|
-| `GW_BASE_URL` | Yes* | Policy System REST base URL (e.g. `https://tenant.everywire.net/pc/rest`) |
+| `GW_BASE_URL` | Yes* | PAS REST base URL (e.g. `https://tenant.everywire.net/pc/rest`) |
 | `GW_TOKEN_URL` | Yes* | OAuth 2.0 token endpoint |
 | `GW_CLIENT_ID` | Yes* | OAuth client ID |
 | `GW_CLIENT_SECRET` | Yes* | OAuth client secret |
@@ -207,7 +207,7 @@ gwmcp/
 ├── views.py        # Policy view model shared by the UI and Claude's text
 ├── state_store.py  # Redis (Upstash) persistence for mock state on serverless
 ├── vercel_app.py   # Vercel entry point ([tool.vercel] in pyproject.toml)
-├── ui/policy_view.html   # The Policy System view (MCP App)
+├── ui/policy_view.html   # The PAS view (MCP App)
 ├── dev/preview_host.html # Local stand-in for Claude to preview the view
 ├── tests/          # pytest: mock workflow + end-to-end over HTTP
 ├── pyproject.toml  # Package config and dependencies

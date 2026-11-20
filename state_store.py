@@ -1,4 +1,4 @@
-"""Persist mock Policy System state in Redis, for serverless hosts such as Vercel.
+"""Persist mock PAS state in Redis, for serverless hosts such as Vercel.
 
 On serverless, each request can land on a fresh process, so the mock's
 in-memory edits would be lost. ``PersistentMockClient`` loads the mock's state
@@ -89,7 +89,7 @@ class PersistentMockClient:
             result = await getattr(mock, method)(*args, **kwargs)  # EverywireError propagates; nothing saved
             if not write or await self.store.save(mock.to_state(), rev):
                 return result
-        raise EverywireError(409, "Policy System is busy with another change to this data. Try again.")
+        raise EverywireError(409, "PAS is busy with another change to this data. Try again.")
 
     # reads
     async def search(self, path, params):
